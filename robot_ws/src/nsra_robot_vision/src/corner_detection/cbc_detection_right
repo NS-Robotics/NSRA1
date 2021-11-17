@@ -1,0 +1,222 @@
+#!/usr/bin/python
+import cv2
+import time
+import numpy as np
+import rospy
+from std_msgs.msg import String
+from nsra_odrive_interface.srv import *
+import multiprocessing as mp
+import yaml
+import sys
+from threading import Thread
+import nsra_gxipy as gx
+
+rospy.init_node('corner_detect_right')
+
+corner_left_x = 0.0
+corner_left_y = 0.0
+corner_left_x1 = 0.0
+corner_left_y1 = 0.0
+
+corner_right_x = 0.0
+corner_right_y = 0.0
+corner_right_x1 = 0.0
+corner_right_y1 = 0.0
+
+criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+
+class camera():
+
+    def __init__(self,cam_num):        
+        #load pipe for data transmittion to the process
+        self.parent_conn, child_conn = mp.Pipe()
+        #load process
+        self.p = mp.Process(target=self.update, args=(child_conn,cam_num))        
+        #start process
+        self.p.daemon = True
+        self.p.start()
+
+    def end(self):
+        #send closure request to process
+
+        self.parent_conn.send(2)
+
+
+    def update(self,conn,cam_num):
+        #load cam into seperate process
+
+        device_manager = gx.DeviceManager()
+
+        devices = {
+            0: "TV0200110013",
+            1: "TV0200110012"
+        }
+
+        print("Cam %s Loading..." % devices.get(cam_num))
+
+        dev_num, dev_info_list = device_manager.update_device_list()
+
+        if dev_num == 0:
+            print("Number of enumerated devices is 0")
+            return
+
+        if cam_num != 0 and cam_num != 1:
+            print("Invalid cam number!")
+            return
+
+        cam = device_manager.open_device_by_sn(devices.get(cam_num))
+
+        if cam.PixelColorFilter.is_implemented() == False:
+            print("This sample does not support mono camera.")
+            cam.close_device()
+            return
+
+        cam.TriggerMode.set(gx.GxSwitchEntry.OFF)
+
+        cam.ExposureTime.set(80000.0)
+
+        cam.Gain.set(5.0)
+
+        cam.BalanceWhiteAuto.set(1)
+
+        cam.data_stream[0].set_acquisition_buffer_number(1)
+        cam.stream_on()
+
+        print("Cam %s Loaded..." % devices.get(cam_num))
+
+        run = True
+
+        while run:
+
+            #recieve input data
+            rec_dat = conn.recv()
+
+            if rec_dat == 1:
+                #if frame requested
+                raw_image = cam.data_stream[0].get_image()
+
+                if raw_image is None:
+                    print("Getting image failed.")
+                    continue
+
+                if raw_image.get_status() == gx.GxFrameStatusList.INCOMPLETE:
+                    pass
+
+                rgb_image = raw_image.convert("RGB")
+                if rgb_image is None:
+                    continue
+
+                numpy_image = rgb_image.get_numpy_array()
+                if numpy_image is None:
+                    continue
+
+                frame = cv2.cvtColor(np.asarray(numpy_image),cv2.COLOR_BGR2RGB)
+
+                conn.send(frame)
+
+            elif rec_dat == 2:
+                #if close requested
+                cam.stream_off()
+                cam.close_device()
+                run = False
+
+        print("Camera Connection Closed")        
+        conn.close()
+
+    def get_frame(self,resize=None):
+        ###used to grab frames from the cam connection process
+
+        ##[resize] param : % of size reduction or increase i.e 0.65 for 35% reduction  or 1.5 for a 50% increase
+
+        #send request
+        self.parent_conn.send(1)
+        frame = self.parent_conn.recv()
+        #print(frame)
+        #reset request 
+        self.parent_conn.send(0)
+
+        #resize if needed
+        if resize == None:            
+            return frame
+        else:
+            return self.rescale_frame(frame,resize)
+
+    def rescale_frame(self,frame, percent=65):
+
+        return cv2.resize(frame,None,fx=percent,fy=percent) 
+
+cam_left = camera(0)
+cam_right = camera(1)
+
+img_left = cam_left.get_frame(0.60)
+img_right = cam_right.get_frame(0.60)
+
+def findCBC_LEFT(img):
+    global corner_left_x
+    global corner_left_y
+    global corner_left_x1
+    global corner_left_y1
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ret, corners = cv2.findChessboardCorners(gray, (6,9), None)
+    if ret == True:
+        corners2 = cv2.cornerSubPix(gray,corners,(11,11),(-1,-1),criteria)
+        corner_left_x = corners2[0,0,0]
+        corner_left_y = corners2[0,0,1]
+        corner_left_x1 = corners2[48,0,0]
+        corner_left_y1 = corners2[48,0,1]
+    else:
+        print("No corners detected in the left image!")    
+
+def findCBC_RIGHT(img):
+    global corner_right_x
+    global corner_right_y
+    global corner_right_x1
+    global corner_right_y1
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ret, corners = cv2.findChessboardCorners(gray, (6,9), None)
+    if ret == True:
+        corners2 = cv2.cornerSubPix(gray,corners,(11,11),(-1,-1),criteria)
+        corner_right_x = corners2[0,0,0]
+        corner_right_y = corners2[0,0,1]
+        corner_right_x1 = corners2[48,0,0]
+        corner_right_y1 = corners2[48,0,1]
+    else:
+        print("No corners detected in the left image!")   
+
+def get2dcoords(req):
+    t1 = Thread(target=findCBC_LEFT,args=([img_left]))
+    t2 = Thread(target=findCBC_RIGHT,args=([img_right]))
+
+    t1.start()
+    t2.start()
+
+    t1.join()
+    t2.join()
+
+    return lr_coordsResponse(corner_left_x, corner_left_y, corner_right_x, corner_right_y, corner_left_x1, corner_left_y1, corner_right_x1, corner_right_y1)
+    
+s = rospy.Service('get2dcoords', lr_coords, get2dcoords)
+
+while True:
+    img_left = cam_left.get_frame(0.60)
+    img_right = cam_right.get_frame(0.60)
+
+    img_left = cv2.circle(img_left, (int(round(corner_left_x)), int(round(corner_left_y))), radius=5, color=(0, 0, 255), thickness=-1)
+    img_right = cv2.circle(img_right, (int(round(corner_right_x)), int(round(corner_right_y))), radius=5, color=(0, 0, 255), thickness=-1)
+
+    img_left = cv2.circle(img_left, (int(round(corner_left_x1)), int(round(corner_left_y1))), radius=5, color=(0, 0, 255), thickness=-1)
+    img_right = cv2.circle(img_right, (int(round(corner_right_x1)), int(round(corner_right_y1))), radius=5, color=(0, 0, 255), thickness=-1)
+
+    output_img = np.concatenate((img_right, img_left), axis=1)
+
+    cv2.imshow('cameras', output_img)
+    #cv2.imshow('right camera', img_right)
+
+    key = cv2.waitKey(1)
+    if key == 27:
+        break
+
+cv2.destroyAllWindows()     
+
+cam_left.end()
+cam_right.end()

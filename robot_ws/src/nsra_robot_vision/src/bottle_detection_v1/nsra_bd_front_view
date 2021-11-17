@@ -1,0 +1,375 @@
+#!/usr/bin/python
+
+############################################################################# 
+#  BSD 3-Clause License
+# 
+#  Copyright (c) 2020, Noa Sendlhofer
+#  All rights reserved.
+# 
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions are met:
+# 
+#  1. Redistributions of source code must retain the above copyright notice, this
+#     list of conditions and the following disclaimer.
+# 
+#  2. Redistributions in binary form must reproduce the above copyright notice,
+#     this list of conditions and the following disclaimer in the documentation
+#     and/or other materials provided with the distribution.
+# 
+#  3. Neither the name of the copyright holder nor the names of its
+#     contributors may be used to endorse or promote products derived from
+#     this software without specific prior written permission.
+# 
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+#  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+#  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+#  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+#  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+#  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+#  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+#  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+#  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+############################################################################# 
+
+# Author: Noa Sendlhofer
+# Desc:   Part of the NSRA Robot Vision stack. Handles the front camera.
+
+import cv2
+import numpy as np
+import scipy as sp
+import scipy.interpolate
+import rospy
+from std_msgs.msg import String
+import sys
+import time
+import multiprocessing as mp
+import math
+from nsra_odrive_interface.msg import obj_det
+from nsra_odrive_interface.srv import *
+from nsra_odrive_interface.msg import bd_robot_coords
+import rospkg
+from configparser import ConfigParser
+
+#config
+config_object = ConfigParser()
+
+#config file path
+rospack = rospkg.RosPack()
+pack_path = rospack.get_path('nsra_robot_vision')
+
+#callibration variables and constants
+origin = np.array([0.0,0.0])
+x_vec = np.array([0.0,0.0])
+rotation = 0.0
+scaling_factor = 1.0
+dist_factor = 277.0/166.0
+
+scaling_factor_offset = 1
+
+table_hight = 745
+camera_hight = 1474
+
+bottle_hight = 80.0
+gripper_offset = 300
+
+camera_distance = 0
+
+pts_center = np.array([])
+pts_top_left = np.array([])
+pts_botton_right = np.array([])
+
+x_coords = np.array([])
+y_coords = np.array([])
+
+x_coords_corr = np.array([])
+
+t=np.array([702,584,505,430,389,344,316,274,241,213,192 ,172, 158, 145, 140])
+v=np.array([273,327,378,445,490,555,602,700,800,900,1000,1100,1200,1300,1350])
+
+robot_origin = np.array([0, 0, 0])
+
+robot_x = 0.0
+robot_y = 0.0
+
+#load config file
+try:
+    config_object.read(pack_path + "/config/front_view_config.yml")
+    origin[0] = config_object.getfloat("CONFIG", "origin_x")
+    origin[1] = config_object.getfloat("CONFIG", "origin_y")
+    x_vec[0] = config_object.getfloat("CONFIG", "x_vec_x")
+    x_vec[1] = config_object.getfloat("CONFIG", "x_vec_y")
+    rotation = config_object.getfloat("CONFIG", "rotation")
+    scaling_factor = config_object.getfloat("CONFIG", "scaling_factor")
+    camera_distance = config_object.getfloat("CONFIG", "camera_distance")
+
+    robot_origin_x = config_object.getint("ROBOT", "robot_origin_x")
+    robot_origin_y = config_object.getint("ROBOT", "robot_origin_y")
+    robot_origin_z = config_object.getint("ROBOT", "robot_origin_z")
+    robot_origin = [robot_origin_x, robot_origin_y, robot_origin_z]
+
+    bottle_hight = config_object.getfloat("ROBOT", "bottle_hight")
+    gripper_offset = config_object.getint("ROBOT", "gripper_offset")
+
+    table_hight = config_object.getint("CAMERA", "table_hight")
+    camera_hight = config_object.getint("CAMERA", "camera_hight")
+
+    print("")
+    print("Calibration file succesfully loaded!")
+    print("origin: " + str(origin))
+    print("x_vec: " + str(x_vec))
+    print("rotation: " + str(rotation) + " radians")
+    print("scaling factor: " + str(scaling_factor))
+    print("camera distance: " + str(camera_distance))
+    print("robot origin: " + str(robot_origin))
+    print("bottle hight: " + str(bottle_hight))
+    print("gripper offset: " + str(gripper_offset))
+    print("table hight: " + str(table_hight))
+    print("camera hight: " + str(camera_hight))
+    print("------------------------------------")
+    print("")  
+except:
+    print("No valid config file found!")
+
+font = cv2.FONT_HERSHEY_SIMPLEX
+
+#camera class
+class camera():
+
+    def __init__(self, rtsp_url):        
+        #load pipe for data transmittion to the process
+        self.parent_conn, child_conn = mp.Pipe()
+        #load process
+        self.p = mp.Process(target=self.update, args=(child_conn, rtsp_url))        
+        #start process
+        self.p.daemon = True
+        self.p.start()
+
+    def end(self):
+        #send closure request to process
+        self.parent_conn.send(2)
+
+    def update(self,conn,rtsp_url):
+        #load cam into seperate process
+        print("Cam Loading...")
+        cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)   
+        print("Cam Loaded...")
+        run = True
+
+        while run:
+            #grab frames from the buffer
+            cap.grab()
+
+            #recieve input data
+            rec_dat = conn.recv()
+
+            if rec_dat == 1:
+                #if frame requested
+                ret,frame = cap.read()
+                conn.send(frame)
+
+            elif rec_dat ==2:
+                #if close requested
+                cap.release()
+                run = False
+
+        print("Camera Connection Closed")        
+        conn.close()
+
+    def get_frame(self,resize=None):
+        #used to grab frames from the cam connection process
+
+        #send request
+        self.parent_conn.send(1)
+        frame = self.parent_conn.recv()
+
+        #reset request 
+        self.parent_conn.send(0)
+
+        #resize if needed
+        if resize == None:            
+            return frame
+        else:
+            return self.rescale_frame(frame,resize)
+
+    def rescale_frame(self,frame, percent=65):
+
+        return cv2.resize(frame,None,fx=percent,fy=percent) 
+
+#define camera ip address
+cam = camera(str(sys.argv[1]))
+
+#find nearest value in array
+def find_nearest(array, value):
+    array = np.asarray(array)
+    idx = (np.abs(array - value)).argmin()
+    return idx
+
+#callibrate new camera position and save in config file
+def callibrate_camera():
+    global origin
+    global x_vec
+    global rotation
+    global scaling_factor
+    global camera_distance
+    #get frame from camera
+    frame = cam.get_frame(1)
+    #apply filter
+    blur_frame = cv2.GaussianBlur(frame, (5,5), 1)
+    #find chessboard corners
+    retval, corners = cv2.findChessboardCorners(blur_frame, (6,9), flags=cv2.CALIB_CB_FAST_CHECK)
+    if retval:
+        #correct chessboard positions
+        r,g,b = cv2.split(blur_frame)
+        criteria = (cv2.TermCriteria_EPS + cv2.TermCriteria_MAX_ITER, 30, 0.1)
+        cv2.cornerSubPix(r, corners, (11,11), (-1,-1), criteria)
+        #draw corners to image and save image
+        cv2.drawChessboardCorners(blur_frame, (6,9), corners, retval)
+        cv2.imwrite("ref_point_front.jpg", blur_frame)
+        ##print(corners)
+        #define origin and x_vec from corner positions
+        origin = [corners[0,0,0], corners[0,0,1]]
+        x_vec = [corners[5,0,0] - corners[0,0,0], corners[5,0,1] - corners[0,0,1]]
+        ##print(str(x_vec[0]) + " / " + str(x_vec[1]))
+        #calculate rotation
+        A = math.atan(x_vec[0]/x_vec[1])
+        ##A = math.degrees(A)
+        rotation = A
+
+        cb_dist_vec = np.array([corners[48,0,0] - corners[0,0,0], corners[48,0,1] - corners[0,0,1]])
+        cb_dist = int(np.linalg.norm(cb_dist_vec))
+        
+        scaling_factor = 277/np.linalg.norm(cb_dist_vec)*scaling_factor_offset
+
+        tnew=np.arange(start=702,stop=140,step=-1)
+        fvcubic=sp.interpolate.interp1d(t,v,kind='cubic')
+        vcubic=fvcubic(tnew)
+        dist = int(np.round(vcubic[702-cb_dist],0)*dist_factor)
+
+        camera_distance = int(math.sqrt(dist**2 - (camera_hight-table_hight)**2))
+        #save to config file
+        config_object["CONFIG"] = {
+            "origin_x": str(origin[0]),
+            "origin_y": str(origin[1]),
+            "x_vec_x": str(x_vec[0]),
+            "x_vec_y": str(x_vec[1]),
+            "rotation": str(rotation),
+            "scaling_factor": str(scaling_factor),
+            "camera_distance": str(camera_distance),
+        }
+
+        with open(pack_path + "/config/front_view_config.yml", 'w') as conf:
+            config_object.write(conf)
+
+        #print config
+        print("")
+        print("Calibration successful!")
+        print("origin: " + str(origin))
+        print("x_vec: " + str(x_vec))
+        print("rotation: " + str(rotation) + " radians")
+        print("scaling factor: " + str(scaling_factor))
+        print("Camera distance: " + str(camera_distance))
+        print("Distance factor: " + str(dist_factor))
+        print("")   
+    else:
+        print("No corners detected!")
+
+def jetson_inference(data):
+    global pts_center
+    global pts_top_left
+    global pts_botton_right
+    if len(data.Center_x) != 0:
+        center = np.array([[data.Center_x[0], data.Center_y[0]]])
+        pts_top_left = np.array([[data.Left[0], data.Top[0]]])
+        pts_botton_right = np.array([[data.Right[0], data.Bottom[0]]])
+        for i in range(len(data.Center_x)-1):
+            b = np.array([[data.Center_x[i+1], data.Center_y[i+1]]])
+            c = np.array([[data.Left[i+1], data.Top[i+1]]])
+            d = np.array([[data.Right[i+1], data.Bottom[i+1]]])
+            center = np.concatenate((center, b), axis=0)
+            pts_top_left = np.concatenate((pts_top_left, c), axis=0)
+            pts_botton_right = np.concatenate((pts_botton_right, d), axis=0)
+        pts_center = center
+
+rospy.init_node('nsra_bd_front_view')
+rospy.Subscriber('nsra/object_detection', obj_det, jetson_inference)
+
+rospy.wait_for_service('nsra/bd_coords')
+
+bd_y_coords = rospy.ServiceProxy('nsra/bd_coords', bd_coords)
+
+pub = rospy.Publisher('nsra/robot_grasp', bd_robot_coords, queue_size=10)
+
+#pub1 = rospy.Publisher('robot_coords_pub', String, queue_size=10)
+
+def mouseCallback(event, x, y, flags, params):
+    global robot_x
+    global robot_y
+    if event == cv2.EVENT_LBUTTONDBLCLK:
+        for i in range(len(pts_center)):
+            if x >= pts_top_left[i,0] and x <= pts_botton_right[i,0] and y >= pts_top_left[i,1] and y <= pts_botton_right[i,1]:
+                idx = find_nearest(x_coords_corr, pts_center[i,0])
+                #print(x,y)
+                print("XY Coords: " + str(x_coords[idx]) + " -- " + str(y_coords[idx]))
+                #pub1.publish(str(x_coords[idx]) + " -- " + str(y_coords[idx]))
+                robot_x = x_coords[idx] + robot_origin[0]
+                robot_y = - y_coords[idx] + robot_origin[1]
+                robot_pub()
+
+def robot_pub():
+    msg = bd_robot_coords()
+    msg.x = robot_x - gripper_offset
+    msg.y = robot_y
+    msg.z = robot_origin[2] + bottle_hight
+    pub.publish(msg)
+
+windowname = "Front view"
+cv2.namedWindow(windowname)
+cv2.setMouseCallback(windowname, mouseCallback)
+
+while True:
+    frame = cam.get_frame(1)
+
+    resp = bd_y_coords(0)
+
+    x_coords = resp.x_coords
+    y_coords = resp.y_coords
+
+    if len(x_coords) != 0:
+        x_coords_corr = list(x_coords)
+        for i in range(len(x_coords)):
+            of_f = 1.0
+            #try:
+            #    of_f = 1 - 1/(camera_distance/y_coords[i]*scaling_factor)
+            #except:
+            #    of_f = 1.0
+            x_coords_corr[i] = (y_coords[i])*scaling_factor*of_f + (720 - origin[0])
+            #print("x_coords" + str(i) + ":" + str(x_coords_corr[i]) + " -- " + str(y_coords[i]))
+            try:
+                #print("x_coords" + str(i) + ":" + str(int(origin[0] - (-x_coords[i])*scaling_factor*of_f)) + " -- " + str(x_coords[i]))
+                cv2.circle(frame,(int(origin[0] - (-x_coords[i])*scaling_factor*of_f), int(pts_center[i,1])), 5, (0,255,0), -1)
+                cv2.putText(frame, "x: " + str(round(x_coords[i], 2)) + " -- y: " + str(round(y_coords[i], 2)), (int(origin[0] - (-x_coords[i])*scaling_factor*of_f) - 150, int(pts_center[i,1]) - 80), font, 1, (255,255,255), 2, cv2.LINE_AA)
+            except:
+                print("Circle detection failed!")
+         
+    if len(pts_center) != 0:
+        for i in range(len(pts_center)):
+            try:
+                cv2.circle(frame,(int(pts_center[i,0]), int(pts_center[i,1])), 5, (0,0,255), -1)
+                cv2.rectangle(frame, (int(pts_top_left[i,0]), int(pts_top_left[i,1])), (int(pts_botton_right[i,0]), int(pts_botton_right[i,1])), (255,0,0), 3)
+            except:
+                print("Circle detection failed!")
+
+    cv2.circle(frame,(int(origin[0]), int(origin[1])), 5, (0,0,255), -1)
+
+    output_img = cv2.resize(frame, (int(frame.shape[1] * 100 / 100), int(frame.shape[0] * 100 / 100)))
+    
+    cv2.imshow(windowname, output_img)
+
+    key = cv2.waitKey(1)
+    if key == 97:
+        cv2.imwrite("ref_frame_front.jpg", frame)
+    if key == 27:
+        break
+    if key == 10:
+        callibrate_camera()

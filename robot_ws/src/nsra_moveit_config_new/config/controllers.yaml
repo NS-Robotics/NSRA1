@@ -1,0 +1,34 @@
+ros_control_namespace: /ROS_CONTROL_NODE
+controller_list:
+  - name: /nsra/position_trajectory_controller
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    default: true
+    joints:
+      - Rev1
+      - Rev2
+      - Rev3
+      - Rev4
+      - Rev5
+      - Rev6
+      #- Slider8
+      #- Slider9
+  - name: /nsra/joint_position_controller
+    action_ns: joint_group_position_controller
+    type: JointGroupPositionController
+    default: true
+    joints:
+      - Rev1
+      - Rev2
+      - Rev3
+      - Rev4
+      - Rev5
+      - Rev6
+  - name: /nsra/gripper_trajectory_controller
+    action_ns: follow_joint_trajectory
+    type: FollowJointTrajectory
+    default: true
+    parallel: true
+    joints:
+      - Slider8
+      - Slider9

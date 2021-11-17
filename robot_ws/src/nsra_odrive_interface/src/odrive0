@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+
+from __future__ import print_function
+
+import rospy
+from std_msgs.msg import String
+from std_msgs.msg import Int32
+import odrive
+from odrive.enums import *
+import time
+import math
+
+from nsra_odrive_interface.srv import *
+
+positions = [0, 0, 0, 0, 0, 0]
+
+hz = 20
+
+print("Connecting...")
+odrv0 = odrive.find_any(serial_number="206E3590524B")
+print("Connected to ODrive 0")
+
+rospy.set_param('odrive0', True)
+
+def drive_pub2(data):
+    print("Axis 2: " + str(data.data))
+    if abs(data.data-positions[1])*hz > 85000:
+        odrv0.axis0.controller.config.vel_limit = abs(data.data-positions[1])*hz
+    else:
+        odrv0.axis0.controller.config.vel_limit = 85000
+    odrv0.axis0.controller.input_pos = data.data
+    #drive2.publish(int(data.data*(1024000)/math.pi))
+    positions[1] = data.data
+
+def drive_pub3(data):
+    print("Axis 3: " + str(data.data))
+    if abs(data.data-positions[2])*hz > 30000:
+        odrv0.axis1.controller.config.vel_limit = abs(data.data-positions[2])*hz
+    else:
+        odrv0.axis1.controller.config.vel_limit = 30000
+    odrv0.axis1.controller.input_pos = data.data
+    #drive3.publish(int(data.data*(1024000)/math.pi))
+    positions[2] = data.data
+
+def axis_requested_state(req):
+    print("Axis requested_state")
+
+    if req.axis == 2:
+        if req.requested_state == 0:
+            odrv0.axis0.requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
+            while odrv0.axis0.current_state != AXIS_STATE_IDLE:
+                time.sleep(0.1)
+            odrv0.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        else:
+            odrv0.axis0.requested_state = req.requested_state
+    if req.axis == 3:
+        if req.requested_state == 0:
+            odrv0.axis1.requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
+            while odrv0.axis1.current_state != AXIS_STATE_IDLE:
+                time.sleep(0.1)
+            odrv0.axis1.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        else:
+            odrv0.axis1.requested_state = req.requested_state
+
+    return requested_stateResponse(True)
+
+rospy.init_node('driver')
+
+rospy.Subscriber("/nsra/drive_pub2", Int32, drive_pub2)
+rospy.Subscriber("/nsra/drive_pub3", Int32, drive_pub3)
+
+requested_state = rospy.Service('odrv0_requested_state', requested_state, axis_requested_state)
+
+rospy.spin()

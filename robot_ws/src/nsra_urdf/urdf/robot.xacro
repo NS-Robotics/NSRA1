@@ -1,0 +1,342 @@
+<?xml version="1.0" ?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro">
+<xacro:macro name="robot">
+<link name="base_link">
+  <inertial>
+    <origin rpy="0 0 0" xyz="0.220772 -0.475604 0.001301"/>
+    <mass value="205.712105"/>
+    <inertia ixx="7.733138" ixy="0.003556" ixz="0.168204" iyy="13.401536" iyz="-0.186948" izz="6.805789"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/base_link.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/base_link.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component1_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="-0.03947300000000001 0.08378200000000002 -0.037645"/>
+    <mass value="20.922358"/>
+    <inertia ixx="0.157797" ixy="0.006062" ixz="-0.315131" iyy="0.205525" iyz="0.370636" izz="0.179141"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="-0.2 0.366257 -0.0"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="-0.2 0.366257 -0.0"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component1_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component2_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="0.0 0.226486 0.05349900000000002"/>
+    <mass value="13.1521"/>
+    <inertia ixx="0.673202" ixy="-0.0" ixz="-0.235485" iyy="0.032171" iyz="0.181962" izz="0.660051"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="-0.2 0.215257 0.12679"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component2_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="-0.2 0.215257 0.12679"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component2_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component3_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="-0.00927900000000001 0.04514400000000002 -0.043902"/>
+    <mass value="11.720524"/>
+    <inertia ixx="0.049256" ixy="0.006477" ixz="-0.002159" iyy="0.032758" iyz="0.00359" izz="0.066201"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="-0.2 -0.244743 -0.04731"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component3_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="-0.2 -0.244743 -0.04731"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component3_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component4_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="0.26249900000000004 -1.3000000000040757e-05 -0.019053"/>
+    <mass value="2.84799"/>
+    <inertia ixx="0.003606" ixy="-1e-06" ixz="-0.006586" iyy="0.035605" iyz="0.009884" izz="0.032806"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="-0.215 -0.350743 -0.00081"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component4_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="-0.215 -0.350743 -0.00081"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component4_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component5_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="-0.097078 1.199999999995649e-05 0.010579999999999999"/>
+    <mass value="2.858845"/>
+    <inertia ixx="0.004147" ixy="1e-06" ixz="0.028379" iyy="0.006606" iyz="-0.027606" izz="0.003957"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="-0.541 -0.350743 -0.04081"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component5_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="-0.541 -0.350743 -0.04081"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component5_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component6_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="-0.052066999999999974 7.999999999996898e-05 -0.00045599999999999997"/>
+    <mass value="1.815773"/>
+    <inertia ixx="0.005253" ixy="2e-06" ixz="-0.000236" iyy="0.006244" iyz="-0.000153" izz="0.00153"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="-0.593 -0.350743 -0.00081"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component6_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="-0.593 -0.350743 -0.00081"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component6_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component8_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="0.793409 0.19907400000000003 -0.272252"/>
+    <mass value="1.320105"/>
+    <inertia ixx="0.000682" ixy="-0.00011" ixz="-0.022235" iyy="0.002443" iyz="0.022711" izz="0.002199"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="0.182596 -0.148634 -0.225661"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component8_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="0.182596 -0.148634 -0.225661"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component8_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component7_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="0.793408 0.16314199999999998 -0.03907"/>
+    <mass value="1.32011"/>
+    <inertia ixx="0.000681" ixy="0.00011" ixz="0.022057" iyy="0.002445" iyz="-0.022338" izz="0.002201"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="0.182596 -0.190634 -0.085661"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component7_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="0.182596 -0.190634 -0.085661"/>
+    <geometry>
+      <mesh filename="package://nsra_urdf/urdf/mm_stl/Component7_1.stl" scale="0.001 0.001 0.001"/>
+    </geometry>
+  </collision>
+</link>
+<joint name="Rev1" type="revolute">
+  <origin rpy="0 0 0" xyz="0.2 -0.366257 0.0"/>
+  <parent link="base_link"/>
+  <child link="Component1_1"/>
+  <axis xyz="0.0 0.01 0.0"/>
+  <limit effort="1" velocity="1.0" lower="-2.0944" upper="2.0944" />
+</joint>
+<transmission name="Rev1_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Rev1">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Rev1_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<joint name="Rev2" type="revolute">
+  <origin rpy="0 0 0" xyz="0.0 0.151 -0.12679"/>
+  <parent link="Component1_1"/>
+  <child link="Component2_1"/>
+  <axis xyz="0.0 -0.0 0.01"/>
+  <limit effort="1" velocity="1.0" lower="-1.5708" upper="1.5708" />
+</joint>
+<transmission name="Rev2_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Rev2">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Rev2_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<joint name="Rev3" type="revolute">
+  <origin rpy="0 0 0" xyz="0.0 0.459999 0.1741"/>
+  <parent link="Component2_1"/>
+  <child link="Component3_1"/>
+  <axis xyz="0.0 -0.0 0.01"/>
+  <limit effort="1" velocity="1.0" lower="-1.5708" upper="1.5708" />
+</joint>
+<transmission name="Rev3_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Rev3">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Rev3_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<joint name="Rev4" type="revolute">
+  <origin rpy="0 0 0" xyz="0.015 0.106 -0.0465"/>
+  <parent link="Component3_1"/>
+  <child link="Component4_1"/>
+  <axis xyz="0.01 0.0 -0.0"/>
+  <limit effort="1" velocity="1.0" lower="-3.1415" upper="3.1415" />
+</joint>
+<transmission name="Rev4_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Rev4">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Rev4_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<joint name="Rev5" type="revolute">
+  <origin rpy="0 0 0" xyz="0.326 0.0 0.04"/>
+  <parent link="Component4_1"/>
+  <child link="Component5_1"/>
+  <axis xyz="0.0 -0.0 0.01"/>
+  <limit effort="1" velocity="1.0" lower="-1.7453" upper="1.7453" />
+</joint>
+<transmission name="Rev5_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Rev5">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Rev5_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<joint name="Rev6" type="revolute">
+  <origin rpy="0 0 0" xyz="0.052 0.0 -0.04"/>
+  <parent link="Component5_1"/>
+  <child link="Component6_1"/>
+  <axis xyz="0.01 -0.0 -0.0"/>
+  <limit effort="1" velocity="1.0" lower="-3.1415" upper="3.1415" />
+</joint>
+<transmission name="Rev6_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Rev6">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Rev6_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<joint name="Slider8" type="prismatic">
+  <origin rpy="0 0 0" xyz="-0.775596 -0.202109 0.224851"/>
+  <parent link="Component6_1"/>
+  <child link="Component8_1"/>
+  <axis xyz="0.0 -0.0 0.01"/>
+  <limit effort="1" lower="0.0" upper="0.02" velocity="1.0"/>
+</joint>
+<transmission name="Slider8_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Slider8">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Slider8_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<joint name="Slider9" type="prismatic">
+  <origin rpy="0 0 0" xyz="-0.775596 -0.160109 0.084851"/>
+  <parent link="Component6_1"/>
+  <child link="Component7_1"/>
+  <axis xyz="-0.0 0.0 -0.01"/>
+  <limit effort="1" lower="0.0" upper="0.02" velocity="1.0"/>
+</joint>
+<transmission name="Slider9_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Slider9">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Slider9_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<gazebo>
+  <plugin filename="libgazebo_ros_control.so" name="control"/>
+</gazebo>
+</xacro:macro>
+</robot>

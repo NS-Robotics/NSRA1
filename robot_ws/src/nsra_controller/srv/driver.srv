@@ -1,0 +1,6 @@
+#request
+int16 axis
+int32 value
+---
+#response
+bool result

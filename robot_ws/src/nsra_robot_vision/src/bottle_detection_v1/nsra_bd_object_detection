@@ -1,0 +1,98 @@
+#!/usr/bin/python3
+
+############################################################################# 
+#  BSD 3-Clause License
+# 
+#  Copyright (c) 2020, Noa Sendlhofer
+#  All rights reserved.
+# 
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions are met:
+# 
+#  1. Redistributions of source code must retain the above copyright notice, this
+#     list of conditions and the following disclaimer.
+# 
+#  2. Redistributions in binary form must reproduce the above copyright notice,
+#     this list of conditions and the following disclaimer in the documentation
+#     and/or other materials provided with the distribution.
+# 
+#  3. Neither the name of the copyright holder nor the names of its
+#     contributors may be used to endorse or promote products derived from
+#     this software without specific prior written permission.
+# 
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+#  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+#  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+#  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+#  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+#  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+#  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+#  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+#  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+############################################################################# 
+
+# Author: Noa Sendlhofer
+# Desc:   Part of the NSRA Robot Vision stack. Handles the Jetson inference object detection.
+
+import jetson.inference
+import jetson.utils
+
+import argparse
+import sys
+
+import rospy
+
+from nsra_odrive_interface.msg import obj_det
+
+rospy.init_node('nsra_bd_object_detection')
+bd = rospy.Publisher('nsra/object_detection', obj_det, queue_size=10)
+
+# parse the command line
+parser = argparse.ArgumentParser(description="Locate objects in a live camera stream using an object detection DNN.", 
+                                 formatter_class=argparse.RawTextHelpFormatter, epilog=jetson.inference.detectNet.Usage() +
+                                 jetson.utils.videoSource.Usage() + jetson.utils.videoOutput.Usage() + jetson.utils.logUsage())
+
+parser.add_argument("input_URI", type=str, default="", nargs='?', help="URI of the input stream")
+parser.add_argument("output_URI", type=str, default="", nargs='?', help="URI of the output stream")
+parser.add_argument("--network", type=str, default="ssd-mobilenet-v2", help="pre-trained model to load (see below for options)")
+parser.add_argument("--overlay", type=str, default="box,labels,conf", help="detection overlay flags (e.g. --overlay=box,labels,conf)\nvalid combinations are:  'box', 'labels', 'conf', 'none'")
+parser.add_argument("--threshold", type=float, default=0.5, help="minimum detection threshold to use") 
+
+is_headless = ["--headless"] if sys.argv[0].find('console.py') != -1 else [""]
+
+try:
+	opt = parser.parse_known_args()[0]
+except:
+	print("")
+	parser.print_help()
+	sys.exit(0)
+
+net = jetson.inference.detectNet(opt.network, sys.argv, opt.threshold)
+
+input = jetson.utils.videoSource(opt.input_URI, argv=sys.argv)
+output = jetson.utils.videoOutput(opt.output_URI, argv=sys.argv+is_headless)
+
+while True:
+	img = input.Capture()
+	detections = net.Detect(img, overlay=opt.overlay)
+			
+	msg = obj_det()
+	for detection in detections:
+		msg.Center_x.append(detection.Center[0])
+		msg.Center_y.append(detection.Center[1])
+		msg.Top.append(detection.Top)
+		msg.Right.append(detection.Right)
+		msg.Left.append(detection.Left)
+		msg.Bottom.append(detection.Bottom)
+	
+	bd.publish(msg)
+
+	output.Render(img)
+
+	output.SetStatus("{:s} | Network {:.0f} FPS".format(opt.network, net.GetNetworkFPS()))
+
+	#net.PrintProfilerTimes()
+
+	if not input.IsStreaming() or not output.IsStreaming():
+		break

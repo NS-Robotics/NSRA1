@@ -1,0 +1,31 @@
+#rosrun nsra_robot_vision single_cam_callibration "camera1.xml" "cam_right_config.xml"
+rosrun nsra_robot_vision calib_intrinsics "rtsp://192.168.1.191" "rtsp://192.168.1.171" 50
+#rosrun nsra_robot_vision read -w 1080 -h 720 -d ~/images/ -e "jpg" -c "rtsp://192.168.1.171" -n "right"
+#rostopic pub -1 /save_img std_msgs/String hello
+rosrun nsra_robot_vision calib_stereo -n 50 -u left_data.xml -v right_data.xml -l left -r right -o cam_stereo.yml -e jpg
+rosrun nsra_robot_vision undistort_rectify -l ~/images/left1.jpg -r ~/images/right1.jpg -c cam_stereo.yml -L ~/images/left_u.jpg -R ~/images/right_u.jpg
+export ROS_MASTER_URI=http://192.168.1.107:11311
+rosrun nsra_robot_vision cbc_detection_right "rtsp://192.168.1.171" "rtsp://192.168.1.105"
+
+rosrun nsra_robot_vision object_detection.py "rtsp://192.168.1.105" "rtp://192.168.1.144:1234" --network=coco-bottle --input-codec=h264
+
+rostopic pub -1 /bd_params std_msgs/String  50/100/50/100/255/100
+rosrun nsra_robot_vision front_view_tracking "rtsp://192.168.1.105"
+rosrun nsra_robot_vision top_view_tracking "rtsp://192.168.1.171"
+
+
+rosrun nsra_python_interface python_interface_test
+rostopic pub -1 /bd_params std_msgs/String  30/30/40/80/200/120
+rosrun nsra_robot_vision nsra_bd_object_detection "rtsp://192.168.1.4" "rtp://192.168.1.11:1234" --network=coco-bottle --input-codec=h264
+rosrun nsra_odrive_interface driver_node
+roslaunch nsra_controller nsra_hardware.launch
+roslaunch nsra_moveit_config nsra_moveit.launch
+rosrun nsra_robot_vision top_view_tracking "rtsp://192.168.1.171"
+rosrun nsra_robot_vision front_view_tracking "rtsp://192.168.1.102"
+
+rosrun rosserial_python serial_node.py /dev/ttyUSB0
+rostopic pub -1 /nsra/gripper_command std_msgs/Int32 1
+
+vel_limit_tolerance!
+
+170/170/70/255/200/255

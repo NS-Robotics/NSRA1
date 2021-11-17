@@ -1,0 +1,110 @@
+#!/usr/bin/env python
+
+from __future__ import print_function
+
+import rospy
+from std_msgs.msg import String
+from std_msgs.msg import Int32
+import time
+import math
+import odrive
+from odrive.enums import *
+#from ODrive_Interface_test.srv import *
+positions = [0, 0, 0, 0, 0, 0]
+
+"""
+drive1 = rospy.Publisher('drive1', Int32, queue_size=10)
+drive2 = rospy.Publisher('drive2', Int32, queue_size=10)
+drive3 = rospy.Publisher('drive3', Int32, queue_size=10)
+drive4 = rospy.Publisher('drive4', Int32, queue_size=10)
+drive5 = rospy.Publisher('drive5', Int32, queue_size=10)
+drive6 = rospy.Publisher('drive6', Int32, queue_size=10)
+"""
+
+p1 = [0, 0, 0, 0, 0, 0]
+p2 = [0, 0, 0, 0, 0, 0]
+
+hz = 20
+"""
+def drive_axis1(req):
+    if p1[req.axis - 1] == 0:
+        t0 = time.monotonic()
+        p1[req.axis - 1] = req.value
+    elif p1[req.axis - 1] != 0 and p2[req.axis - 1] == 0:
+        t0 = t0 + hz
+        p2[req.axis - 1] = p1[req.axis - 1]
+        p1[req.axis - 1] = req.value
+    elif p1[req.axis - 1] != 0 and p2[req.axis - 1] != 0:
+        t0 = t0 + hz
+        drive1 //TODO
+"""
+ 
+def drive_axis(req):
+    #print("Driving Axis " + str(req.axis) + ": " + str(req.value*204800/math.pi))
+    if req.axis == 1:
+        print("Axis " + str(req.axis) + ": " + str(abs(req.value-positions[0])*1024000/math.pi*hz) + "--" + str(req.timestamp))
+        drive1.publish(int(req.value*(1024000)/math.pi))
+    if req.axis == 2:
+        print("Axis " + str(req.axis) + ": " + str(abs(req.value-positions[1])*1024000/math.pi*hz) + "--" + str(req.timestamp))
+        drive2.publish(int(req.value*(1024000)/math.pi))
+    if req.axis == 3:
+        print("Axis " + str(req.axis) + ": " + str(abs(req.value-positions[2])*204800/math.pi*hz) + "--" + str(req.timestamp))
+        drive3.publish(int(req.value*(204800)/math.pi))
+    if req.axis == 4:
+        print("Axis " + str(req.axis) + ": " + str(abs(req.value-positions[3])*204800/math.pi*hz) + "--" + str(req.timestamp))
+        drive4.publish(int(req.value*(204800)/math.pi))
+    if req.axis == 5:
+        print("Axis " + str(req.axis) + ": " + str(abs(req.value-positions[4])*204800/math.pi*hz) + "--" + str(req.timestamp))
+        drive5.publish(int(req.value*(204800)/math.pi))
+    if req.axis == 6:
+        print("Axis " + str(req.axis) + ": " + str(abs(req.value-positions[5])*204800/math.pi*hz) + "--" + str(req.timestamp))
+        drive6.publish(int(req.value*(204800)/math.pi))
+    #positions[req.axis - 1] = req.value
+    return driverResponse(True)
+
+def drive_pub1(data):
+    print("Axis 1: " + str(abs(data.data-positions[0])*1024000/math.pi*hz))
+    #drive1.publish(int(data.data*(1024000)/math.pi))
+    #positions[0] = data.data
+
+def drive_pub2(data):
+    print("Axis 2: " + str(abs(data.data-positions[1])*1024000/math.pi*hz))
+    #drive2.publish(int(data.data*(1024000)/math.pi))
+    #positions[1] = data.data
+
+def drive_pub3(data):
+    print("Axis 3: " + str(abs(data.data-positions[2])*1024000/math.pi*hz))
+    #drive3.publish(int(data.data*(1024000)/math.pi))
+    #positions[2] = data.data
+
+def drive_pub4(data):
+    print("Axis 4: " + str(abs(data.data-positions[3])*1024000/math.pi*hz))
+    #drive4.publish(int(data.data*(1024000)/math.pi))
+    #positions[3] = data.data
+
+def drive_pub5(data):
+    print("Axis 5: " + str(abs(data.data-positions[4])*1024000/math.pi*hz))
+    #drive5.publish(int(data.data*(1024000)/math.pi))
+    #positions[4] = data.data
+
+def drive_pub6(data):
+    print("Axis 6: " + str(abs(data.data-positions[5])*1024000/math.pi*hz))
+    #drive6.publish(int(data.data*(1024000)/math.pi))
+    #positions[5] = data.data
+"""
+def axis_position(req):
+    #print("Axis Postition " + str(req.axis) + ": " + str(positions[req.axis - 1]))
+    return feedbackResponse(positions[req.axis - 1])
+"""
+
+rospy.init_node('driver')
+
+#feedback = rospy.Service('axis_position', feedback, axis_position)
+rospy.Subscriber("/nsra/drive_pub1", Int32, drive_pub1)
+rospy.Subscriber("/nsra/drive_pub2", Int32, drive_pub2)
+rospy.Subscriber("/nsra/drive_pub3", Int32, drive_pub3)
+rospy.Subscriber("/nsra/drive_pub4", Int32, drive_pub4)
+rospy.Subscriber("/nsra/drive_pub5", Int32, drive_pub5)
+rospy.Subscriber("/nsra/drive_pub6", Int32, drive_pub6)
+
+rospy.spin()

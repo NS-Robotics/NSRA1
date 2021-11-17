@@ -1,0 +1,399 @@
+#!/usr/bin/python
+
+############################################################################# 
+#  BSD 3-Clause License
+# 
+#  Copyright (c) 2020, Noa Sendlhofer
+#  All rights reserved.
+# 
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions are met:
+# 
+#  1. Redistributions of source code must retain the above copyright notice, this
+#     list of conditions and the following disclaimer.
+# 
+#  2. Redistributions in binary form must reproduce the above copyright notice,
+#     this list of conditions and the following disclaimer in the documentation
+#     and/or other materials provided with the distribution.
+# 
+#  3. Neither the name of the copyright holder nor the names of its
+#     contributors may be used to endorse or promote products derived from
+#     this software without specific prior written permission.
+# 
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+#  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+#  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+#  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+#  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+#  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+#  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+#  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+#  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+############################################################################# 
+
+# Author: Noa Sendlhofer
+# Desc:   Part of the NSRA Robot Vision stack. Handles the top camera.
+
+import cv2
+import numpy as np
+import rospy
+from std_msgs.msg import String
+from std_msgs.msg import Float32
+import sys
+import time
+import multiprocessing as mp
+from nsra_odrive_interface.srv import *
+import math
+import rospkg
+from configparser import ConfigParser
+
+#config
+config_object = ConfigParser()
+#config file path
+rospack = rospkg.RosPack()
+pack_path = rospack.get_path('nsra_robot_vision')
+#color filter parameter
+rl = 90
+gl = 40
+bl = 100
+rh = 115
+gh = 255
+bh = 255
+
+#callibration variables and constants
+offset_factor = 0.75
+
+origin = np.array([0.0,0.0])
+x_vec = np.array([0.0,0.0])
+rotation = 0.0
+scaling_factor = 1.0
+
+x_coord = np.array([])
+y_coord = np.array([])
+
+last_coords = np.array([[0.0, 0.0]])
+
+font = cv2.FONT_HERSHEY_SIMPLEX
+
+#load config file
+try:
+    config_object.read(pack_path + "/config/top_view_config.yml")
+    origin[0] = config_object.getfloat("CONFIG", "origin_x")
+    origin[1] = config_object.getfloat("CONFIG", "origin_y")
+    x_vec[0] = config_object.getfloat("CONFIG", "x_vec_x")
+    x_vec[1] = config_object.getfloat("CONFIG", "x_vec_y")
+    rotation = config_object.getfloat("CONFIG", "rotation")
+    scaling_factor = config_object.getfloat("CONFIG", "scaling_factor")
+    offset_factor = config_object.getfloat("COORDS", "offset_factor")
+    print("")
+    print("Calibration file succesfully loaded!")
+    print("origin: " + str(origin))
+    print("x_vec: " + str(x_vec))
+    print("rotation: " + str(rotation) + " radians")
+    print("scaling factor: " + str(scaling_factor))
+    print("offset factor: " + str(offset_factor))
+    print("")  
+    rl = config_object.getint("PARAMS", "rl")
+    gl = config_object.getint("PARAMS", "gl")
+    bl = config_object.getint("PARAMS", "bl")
+    rh = config_object.getint("PARAMS", "rh")
+    gh = config_object.getint("PARAMS", "gh")
+    bh = config_object.getint("PARAMS", "bh")
+except:
+    print("No valid config file found!")
+
+#camera class
+class camera():
+
+    def __init__(self,rtsp_url):        
+        #load pipe for data transmittion to the process
+        self.parent_conn, child_conn = mp.Pipe()
+        #load process
+        self.p = mp.Process(target=self.update, args=(child_conn,rtsp_url))        
+        #start process
+        self.p.daemon = True
+        self.p.start()
+
+    def end(self):
+        #send closure request to process
+
+        self.parent_conn.send(2)
+
+    def update(self,conn,rtsp_url):
+        #load cam into seperate process
+
+        print("Cam Loading...")
+        cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)   
+        print("Cam Loaded...")
+        run = True
+
+        while run:
+            #grab frames from the buffer
+            cap.grab()
+
+            #recieve input data
+            rec_dat = conn.recv()
+
+            if rec_dat == 1:
+                #if frame requested
+                ret,frame = cap.read()
+                conn.send(frame)
+
+            elif rec_dat ==2:
+                #if close requested
+                cap.release()
+                run = False
+
+        print("Camera Connection Closed")        
+        conn.close()
+
+    def get_frame(self,resize=None):
+        #used to grab frames from the cam connection process
+
+        #send request
+        self.parent_conn.send(1)
+        frame = self.parent_conn.recv()
+
+        #reset request 
+        self.parent_conn.send(0)
+
+        #resize if needed
+        if resize == None:            
+            return frame
+        else:
+            return self.rescale_frame(frame,resize)
+
+    def rescale_frame(self,frame, percent=65):
+        return cv2.resize(frame,None,fx=percent,fy=percent) 
+
+#define camera ip address
+cam = camera(str(sys.argv[1]))
+
+##cap = cv2.VideoCapture(0)
+##cap.set(cv2.CAP_PROP_AUTOFOCUS, 0)
+
+#rotation matrix
+def rot_pts(pts):
+    a = np.array([[math.cos(rotation),  math.sin(rotation)],
+                  [-math.sin(rotation), math.cos(rotation)]])
+    for i in range(len(pts)):
+        pts[i,:] = a.dot(pts[i,:])
+    return pts
+
+
+def callibrate_camera():
+    global origin
+    global x_vec
+    global rotation
+    global scaling_factor
+    #get frame from camera
+    frame = cam.get_frame(1)
+    ##_, frame = cap.read()
+    #apply filter
+    blur_frame = cv2.GaussianBlur(frame, (5,5), 1)
+    #find chessboard corners
+    retval, corners = cv2.findChessboardCorners(blur_frame, (6,9), flags=cv2.CALIB_CB_FAST_CHECK)
+    if retval:
+        #correct chessboard positions
+        r,g,b=cv2.split(blur_frame)
+        criteria = (cv2.TermCriteria_EPS + cv2.TermCriteria_MAX_ITER, 30, 0.1)
+        cv2.cornerSubPix(r, corners, (11,11), (-1,-1), criteria)
+        #draw corners to image and save image
+        cv2.drawChessboardCorners(blur_frame, (6,9), corners, retval)
+        cv2.imwrite("ref_point_top.jpg", blur_frame)
+        ##print(corners)
+        #define origin and x_vec from corner positions
+        origin = [corners[0,0,0], corners[0,0,1]]
+        x_vec = [corners[5,0,0] - corners[0,0,0], corners[5,0,1] - corners[0,0,1]]
+        ##print(str(x_vec[0]) + " / " + str(x_vec[1]))
+        #calculate rotation
+        A = math.atan(x_vec[0]/x_vec[1])
+        ##A = math.degrees(A)
+        rotation = A
+
+        scaling_factor = 172/np.linalg.norm(x_vec)
+        
+        #save config to file
+        config_object["CONFIG"] = {
+            "origin_x": str(origin[0]),
+            "origin_y": str(origin[1]),
+            "x_vec_x": str(x_vec[0]),
+            "x_vec_y": str(x_vec[1]),
+            "rotation": str(rotation),
+            "scaling_factor": str(scaling_factor),
+        }
+
+        with open(pack_path + "/config/top_view_config.yml", 'w') as conf:
+            config_object.write(conf)
+
+        print("")
+        print("Calibration successful!")
+        print("origin: " + str(origin))
+        print("x_vec: " + str(x_vec))
+        print("rotation: " + str(rotation) + " radians")
+        print("scaling factor: " + str(scaling_factor))
+        print("")   
+    else:
+        print("No corners detected!")
+
+def paramsChangeCallback(data):
+    msg = str(data.data)
+    sp_msg = msg.split("/")
+
+    global rl
+    global gl
+    global bl
+    global rh
+    global gh
+    global bh
+    
+    rl = int(sp_msg[0])
+    gl = int(sp_msg[1])
+    bl = int(sp_msg[2])
+    rh = int(sp_msg[3])
+    gh = int(sp_msg[4])
+    bh = int(sp_msg[5])
+
+    config_object["PARAMS"] = {
+            "rl": str(rl),
+            "gl": str(gl),
+            "bl": str(bl),
+            "rh": str(rh),
+            "gh": str(gh),
+            "bh": str(bh),
+    }
+
+    with open(pack_path + "/config/top_view_config.yml", 'w') as conf:
+        config_object.write(conf)
+
+def bd_y_coords(req):
+    global last_coords
+    print("len: " + str(len(x_coord)))
+    if (len(x_coord) == 0) or (len(y_coord) == 0):
+        return bd_coordsResponse(tuple([0.0]), tuple([0.0]))
+    try:
+        print("y: " + str(y_coord))
+        print("x: " + str(x_coord))
+        pts_array = np.array([[origin[0] - x_coord[0], origin[1] - y_coord[0]]])
+        for i in range(len(x_coord)-1):
+            b = np.array([[origin[0] - x_coord[i+1], origin[1] - y_coord[i+1]]])
+            pts_array = np.concatenate((pts_array, b), axis=0)
+        print("Pts: " + str(pts_array))
+        rotated_pts = rot_pts(pts_array)
+        print("rot_pts: " + str(rotated_pts))
+
+        x_coord_rot = rotated_pts[:, 0]
+        y_coord_rot = rotated_pts[:, 1]
+
+        ofst_corr_pt_x = np.array(
+            [((origin[0] - 960) + (960 - (origin[0] - x_coord_rot[0]))*offset_factor)*scaling_factor])
+        ofst_corr_pt_y = np.array(
+            [((origin[1] - 540) + (540 - (origin[1] - y_coord_rot[0]))*offset_factor)*scaling_factor])
+
+        last_coords = np.array([[((origin[0] - 960) + (960 - (origin[0] - x_coord_rot[0]))*offset_factor)*scaling_factor, ((origin[1] - 540) + (540 - (origin[1] - y_coord_rot[0]))*offset_factor)*scaling_factor, x_coord[0], y_coord[0]]])
+
+        for i in range(len(x_coord_rot)-1):
+            b1 = np.array([((origin[0] - 960) + (960 - (origin[0] - x_coord_rot[i+1]))*offset_factor)*scaling_factor])
+            b2 = np.array([((origin[1] - 540) + (540 - (origin[1] - y_coord_rot[i+1]))*offset_factor)*scaling_factor])
+            b3 = np.array([[((origin[0] - 960) + (960 - (origin[0] - x_coord_rot[i+1]))*offset_factor)*scaling_factor, ((origin[1] - 540) + (540 - (origin[1] - y_coord_rot[i+1]))*offset_factor)*scaling_factor, x_coord[i+1], y_coord[i+1]]])
+            ofst_corr_pt_x = np.concatenate((ofst_corr_pt_x, b1), axis=0)
+            ofst_corr_pt_y = np.concatenate((ofst_corr_pt_y, b2), axis=0)
+            last_coords = np.concatenate((last_coords, b3), axis=0)
+        print(ofst_corr_pt_x)
+        print(ofst_corr_pt_y)
+        print(last_coords)
+
+        return bd_coordsResponse(tuple(ofst_corr_pt_x), tuple(ofst_corr_pt_y))
+    except:
+        print("No corners detected error!")
+        return bd_coordsResponse(tuple([0.0]), tuple([0.0]))
+
+def bd_offset_factor(data):
+    global offset_factor
+    offset_factor = float(data.data)
+
+    config_object["COORDS"] = {
+            "offset_factor": str(offset_factor),
+    }
+
+    with open(pack_path + "/config/top_view_config.yml", 'w') as conf:
+        config_object.write(conf)
+
+rospy.init_node('nsra_bd_top_view')
+rospy.Subscriber("bd_params", String, paramsChangeCallback)
+rospy.Subscriber("bd_offset_factor", Float32, bd_offset_factor)
+s = rospy.Service('nsra/bd_coords', bd_coords, bd_y_coords)
+
+params = cv2.SimpleBlobDetector_Params()
+
+params.filterByArea = True
+params.minArea = 100
+params.maxArea = 10000
+
+params.filterByCircularity = True
+params.minCircularity = 0.1
+
+params.filterByConvexity = True
+params.minConvexity = 0
+params.maxConvexity = 1
+
+params.filterByInertia = True
+params.minInertiaRatio = 0.1
+
+detector = cv2.SimpleBlobDetector_create(params)
+
+while True:
+    frame = cam.get_frame(1)
+    ##_, frame = cap.read()
+    blur_frame = cv2.GaussianBlur(frame, (5,5), 1)
+    hsv_frame = cv2.cvtColor(blur_frame, cv2.COLOR_BGR2HSV)
+
+    low_red = np.array([rl,gl,bl])
+    high_red = np.array([rh, gh, bh])
+    red_mask = cv2.inRange(hsv_frame, low_red, high_red)
+
+    red_mask = cv2.bitwise_not(red_mask)
+
+    kernal = np.ones((10,10), np.uint8)
+    red_mask = cv2.dilate(red_mask, kernal)
+
+    keypoints = detector.detect(red_mask)
+    imgKeyPoints = cv2.drawKeypoints(red_mask, keypoints, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    blur_frame_points = cv2.drawKeypoints(blur_frame, keypoints, np.array([]), (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+    cv2.putText(blur_frame_points, "-- x --", (890, 20), font, 1, (255,255,255), 2, cv2.LINE_AA)
+    cv2.putText(blur_frame_points, "y", (10, 540), font, 1, (255,255,255), 2, cv2.LINE_AA)
+    cv2.circle(blur_frame_points,(int(origin[0]), int(origin[1])), 5, (0,0,255), -1)
+
+    x = np.array([])
+    y = np.array([])
+    for i in range(len(keypoints)):
+        x = np.append(x, keypoints[i].pt[0])
+        y = np.append(y, keypoints[i].pt[1])
+    x_coord = x
+    y_coord = y
+
+    try:
+        if last_coords[0,0] != 0.0:
+            for i in range(len(last_coords)):
+                #x = np.append(x, keypoints[i].pt[0])
+                #y = np.append(y, keypoints[i].pt[1])
+                #cv2.putText(blur_frame_points, "idx: " + str(i + 1), (int(keypoints[i].pt[0]) - 40, int(keypoints[i].pt[1]) - 50), font, 1, (255,255,255), 2, cv2.LINE_AA)
+                cv2.putText(blur_frame_points, "x: " + str(round(last_coords[i, 0], 2)) + " -- y: " + str(round(last_coords[i, 1], 2)), (int(last_coords[i, 2]) - 200, int(last_coords[i, 3]) - 50), font, 1, (255,255,255), 2, cv2.LINE_AA)
+    except:
+        print("Coords error!")
+    
+    output_img = np.concatenate((blur_frame_points, imgKeyPoints), axis=1)
+    output_img = cv2.resize(output_img, (int(output_img.shape[1] * 50 / 100), int(output_img.shape[0] * 50 / 100)))
+    cv2.imshow("Top view", output_img)
+    #cv2.imshow("Top view original", blur_frame_points)
+    #cv2.imshow("Top view masked", imgKeyPoints)
+
+    key = cv2.waitKey(1)
+    if key == 97:
+        cv2.imwrite("ref_frame_top.jpg", output_img)
+    if key == 27:
+        break
+    if key == 10:
+        callibrate_camera()

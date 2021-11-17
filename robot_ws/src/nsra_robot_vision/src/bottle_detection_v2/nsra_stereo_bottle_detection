@@ -1,0 +1,930 @@
+#!/usr/bin/python3
+
+############################################################################# 
+#  BSD 3-Clause License
+# 
+#  Copyright (c) 2020, Noa Sendlhofer
+#  All rights reserved.
+# 
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions are met:
+# 
+#  1. Redistributions of source code must retain the above copyright notice, this
+#     list of conditions and the following disclaimer.
+# 
+#  2. Redistributions in binary form must reproduce the above copyright notice,
+#     this list of conditions and the following disclaimer in the documentation
+#     and/or other materials provided with the distribution.
+# 
+#  3. Neither the name of the copyright holder nor the names of its
+#     contributors may be used to endorse or promote products derived from
+#     this software without specific prior written permission.
+# 
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+#  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+#  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+#  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+#  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+#  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+#  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+#  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+#  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+############################################################################# 
+
+# Author: Noa Sendlhofer
+# Desc:   Part of the NSRA Robot Vision stack. Stereo camera test program using an NDI source.
+# 01.01.2021 - Stereo camera works! :)
+# 06.02.2021 - Full bottle detection works! :)
+
+import cv2
+import multiprocessing as mp
+import subprocess as sp
+import yaml
+import sys
+import nsra_gxipy as gx
+import numpy as np
+import math
+import rospkg
+import threading
+import rospy
+import time
+from termcolor import colored
+from std_msgs.msg import String
+from std_msgs.msg import Float32
+from configparser import ConfigParser
+from nsra_robot_vision.msg import *
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
+
+#config
+config_object = ConfigParser()
+
+#rospack
+rospack = rospkg.RosPack()
+pack_path = rospack.get_path('nsra_robot_vision')
+rospy.init_node('nsra_stereo_camera')
+
+#config
+#Projection
+PR = None
+PL = None
+#Intrinsics
+KR = None
+KL = None
+#Distortion
+DR = None
+DL = None
+#Rotation
+RR = None
+RL = None
+
+#aruco
+arucoDict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_4X4_50)
+arucoParams = cv2.aruco.DetectorParameters_create()
+
+#color filter parameter 105/120/100/120/220/255
+color_filter = [105,120,100,120,220,255]
+
+#World origin of cameras relative to the robot
+mtrx = np.array([[0.0, 0.0, 0.0],
+                 [0.0, 0.0, 0.0],
+                 [0.0, 0.0, 0.0]])
+
+rob_offset_vec = np.array([0.0, 0.0, 0.0])
+
+cam_config = [15.0,100000.0]
+
+pnts_img = np.zeros((2,3,2))
+
+#load config file
+try:
+    config_object.read(pack_path + "/config/stereo_bd_config.yml")
+    mtrx[0,0] = config_object.getfloat("CONFIG", "mtrx_0")
+    mtrx[0,1] = config_object.getfloat("CONFIG", "mtrx_1")
+    mtrx[0,2] = config_object.getfloat("CONFIG", "mtrx_2")
+    mtrx[1,0] = config_object.getfloat("CONFIG", "mtrx_3")
+    mtrx[1,1] = config_object.getfloat("CONFIG", "mtrx_4")
+    mtrx[1,2] = config_object.getfloat("CONFIG", "mtrx_5")
+    mtrx[2,0] = config_object.getfloat("CONFIG", "mtrx_6")
+    mtrx[2,1] = config_object.getfloat("CONFIG", "mtrx_7")
+    mtrx[2,2] = config_object.getfloat("CONFIG", "mtrx_8")
+
+    pnts_img[0,0,0] = config_object.getfloat("CONFIG", "pnts_0")
+    pnts_img[0,0,1] = config_object.getfloat("CONFIG", "pnts_1")
+    pnts_img[0,1,0] = config_object.getfloat("CONFIG", "pnts_2")
+    pnts_img[0,1,1] = config_object.getfloat("CONFIG", "pnts_3")
+    pnts_img[0,2,0] = config_object.getfloat("CONFIG", "pnts_4")
+    pnts_img[0,2,1] = config_object.getfloat("CONFIG", "pnts_5")
+    pnts_img[1,0,0] = config_object.getfloat("CONFIG", "pnts_6")
+    pnts_img[1,0,1] = config_object.getfloat("CONFIG", "pnts_7")
+    pnts_img[1,1,0] = config_object.getfloat("CONFIG", "pnts_8")
+    pnts_img[1,1,1] = config_object.getfloat("CONFIG", "pnts_9")
+    pnts_img[1,2,0] = config_object.getfloat("CONFIG", "pnts_10")
+    pnts_img[1,2,1] = config_object.getfloat("CONFIG", "pnts_11")
+
+    cam_config[0] = config_object.getfloat("CAMERA", "cam_gain")
+    cam_config[1] = config_object.getfloat("CAMERA", "cam_exposure")
+
+    color_filter[0] = config_object.getint("PARAMS", "hh")
+    color_filter[1] = config_object.getint("PARAMS", "sh")
+    color_filter[2] = config_object.getint("PARAMS", "vh")
+    color_filter[3] = config_object.getint("PARAMS", "hl")
+    color_filter[4] = config_object.getint("PARAMS", "sl")
+    color_filter[5] = config_object.getint("PARAMS", "vl")
+
+    rob_offset_vec[0] = config_object.getfloat("ROBOT", "rob_offset_x")
+    rob_offset_vec[1] = config_object.getfloat("ROBOT", "rob_offset_y")
+    rob_offset_vec[2] = config_object.getfloat("ROBOT", "rob_offset_z")
+
+    rospy.set_param('table_height', int(round(rob_offset_vec[2])))
+
+    print("---------------")
+    print("Config File Parameters loaded!")
+    print("Transformation matrix:")
+    print(mtrx)
+    print("Camera config:")
+    print("Gain: %f Exposure: %f" % (cam_config[0], cam_config[1]))
+    print("HSV Color filter:")
+    print("Upper limit: %d / %d / %d Lower limit: %d / %d / %d" % (color_filter[0], color_filter[1], color_filter[2], color_filter[3], color_filter[4], color_filter[5]))
+    print("Robot offset:")
+    print("x: %f y: %f z: %f" % (rob_offset_vec[0], rob_offset_vec[1], rob_offset_vec[2]))
+    print("---------------")
+
+except:
+    print(colored("No valid config file found!", 'red'))
+
+try:
+    fs = cv2.FileStorage(pack_path + "/config/cam_stereo.yml", cv2.FILE_STORAGE_READ)
+    PR = fs.getNode("PR").mat()
+    PL = fs.getNode("PL").mat()
+    KR = fs.getNode("KR").mat()
+    KL = fs.getNode("KL").mat()
+    DR = fs.getNode("DR").mat()
+    DL = fs.getNode("DL").mat()
+    RR = fs.getNode("RR").mat()
+    RL = fs.getNode("RL").mat()
+except:
+    print(colored("Error no config file found!", 'red'))
+    quit()
+
+if PR.any() == None or PL.any() == None:
+    print(colored("Error config file not valid!", 'red'))
+    quit()
+
+try:
+    chessImg = cv2.imread(pack_path + "/images/left1.jpg")
+    imsize = (chessImg.shape[1], chessImg.shape[0])
+except:
+    print(colored("Error no valid image found in the /image folder!", 'red'))
+    quit()
+
+if rospy.has_param('camera_config') and rospy.has_param('color_filter'):
+    cam_config = rospy.get_param('camera_config')
+    color_filter = rospy.get_param('color_filter')
+
+    config_object["PARAMS"] = {
+            "hh": str(color_filter[0]),
+            "sh": str(color_filter[1]),
+            "vh": str(color_filter[2]),
+            "hl": str(color_filter[3]),
+            "sl": str(color_filter[4]),
+            "vl": str(color_filter[5]),
+    }
+
+    with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+        config_object.write(conf)
+    
+    config_object["CAMERA"] = {
+            "cam_gain": str(cam_config[0]),
+            "cam_exposure": str(cam_config[1]),
+    }
+
+    with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+        config_object.write(conf)
+
+    print("---------------")
+    print("ROS Paramaters loaded!")
+    print("Camera config:")
+    print("Gain: %f Exposure: %f" % (cam_config[0], cam_config[1]))
+    print("HSV Color filter:")
+    print("Upper limit: %d / %d / %d Lower limit: %d / %d / %d" % (color_filter[0], color_filter[1], color_filter[2], color_filter[3], color_filter[4], color_filter[5]))
+    print("---------------")
+
+# initUndistortRectifyMap 
+Left_Stereo_Map = cv2.initUndistortRectifyMap(KL, DL, RL, PL,
+                                             imsize, cv2.CV_16SC2)
+Right_Stereo_Map = cv2.initUndistortRectifyMap(KR, DR, RR, PR,
+                                              imsize, cv2.CV_16SC2)
+
+#CBC detection
+criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+
+class camera():
+
+    def __init__(self,cam_num):        
+        #load pipe for data transmittion to the process
+        self.parent_conn, child_conn = mp.Pipe()
+        #load process
+        self.p = mp.Process(target=self.update, args=(child_conn,cam_num))        
+        #start process
+        self.cam = None
+
+        self.p.daemon = True
+        self.p.start()
+
+    def end(self):
+        #send closure request to process
+
+        self.parent_conn.send(2)
+
+
+    def update(self,conn,cam_num):
+        #load cam into seperate process
+
+        device_manager = gx.DeviceManager()
+
+        devices = {
+            0: "TV0200110013",
+            1: "TV0200110012"
+        }
+
+        print("Cam %s Loading..." % devices.get(cam_num))
+
+        dev_num, dev_info_list = device_manager.update_device_list()
+
+        if dev_num == 0:
+            print(colored("Number of enumerated devices is 0", 'red'))
+            return
+
+        if cam_num != 0 and cam_num != 1:
+            print(colored("Invalid cam number!", 'red'))
+            return
+
+        self.cam = device_manager.open_device_by_sn(devices.get(cam_num))
+
+        if self.cam.PixelColorFilter.is_implemented() == False:
+            print(colored("This program does not support mono camera.", 'red'))
+            self.cam.close_device()
+            return
+
+        self.cam.TriggerMode.set(gx.GxSwitchEntry.OFF)
+
+        self.cam.ExposureTime.set(cam_config[1])
+
+        self.cam.Gain.set(cam_config[0])
+
+        self.cam.BalanceWhiteAuto.set(1)
+
+        self.cam.data_stream[0].set_acquisition_buffer_number(1)
+        self.cam.stream_on()
+
+        print(colored("Cam %s Loaded..." % devices.get(cam_num), 'green'))
+
+        run = True
+
+        while run:
+
+            #recieve input data
+            rec_dat = conn.recv()
+
+            if rec_dat == 1:
+                #if frame requested
+                raw_image = self.cam.data_stream[0].get_image()
+
+                if raw_image is None:
+                    print(colored("Getting image failed.", 'red'))
+                    continue
+
+                if raw_image.get_status() == gx.GxFrameStatusList.INCOMPLETE:
+                    pass
+
+                rgb_image = raw_image.convert("RGB")
+                if rgb_image is None:
+                    continue
+
+                numpy_image = rgb_image.get_numpy_array()
+                if numpy_image is None:
+                    continue
+
+                frame = cv2.cvtColor(np.asarray(numpy_image),cv2.COLOR_BGR2RGB)
+
+                conn.send(frame)
+
+            elif rec_dat == 2:
+                #if close requested
+                self.cam.stream_off()
+                self.cam.close_device()
+                run = False
+            
+            elif rec_dat == 3:
+                gain = conn.recv()
+                exp = conn.recv()
+                try:
+                    self.cam.ExposureTime.set(exp)
+                    self.cam.Gain.set(gain)
+                except:
+                    print(colored("Error changing parameters!", 'red'))
+
+        print("Camera %s Connection Closed" % devices.get(cam_num))        
+        conn.close()
+
+    def get_frame(self,resize=None):
+
+        self.parent_conn.send(1)
+        frame = self.parent_conn.recv()
+        self.parent_conn.send(0)
+
+        if resize == None:            
+            return frame
+        else:
+            return self.rescale_frame(frame,resize)
+    
+    def change_params(self):
+
+        self.parent_conn.send(3)
+        self.parent_conn.send(cam_config[0])
+        self.parent_conn.send(cam_config[1])
+        self.parent_conn.send(0)
+        
+    def rescale_frame(self,frame, percent=65):
+
+        return cv2.resize(frame,None,fx=percent,fy=percent) 
+
+cam_left = camera(0)
+cam_right = camera(1)
+
+params = cv2.SimpleBlobDetector_Params()
+
+params.filterByArea = True
+params.minArea = 100
+params.maxArea = 100000
+
+params.filterByCircularity = True
+params.minCircularity = 0.1
+
+params.filterByConvexity = True
+params.minConvexity = 0
+params.maxConvexity = 1
+
+params.filterByInertia = True
+params.minInertiaRatio = 0.1
+
+detector = cv2.SimpleBlobDetector_create(params)
+
+params_hr = cv2.SimpleBlobDetector_Params()
+
+params_hr.filterByArea = True
+params_hr.minArea = 1000
+params_hr.maxArea = 100000
+
+params_hr.filterByCircularity = True
+params_hr.minCircularity = 0.1
+
+params_hr.filterByConvexity = True
+params_hr.minConvexity = 0
+params_hr.maxConvexity = 1
+
+params_hr.filterByInertia = True
+params_hr.minInertiaRatio = 0.1
+
+detector_hr = cv2.SimpleBlobDetector_create(params_hr)
+
+kernal = np.ones((2,2), np.uint8)
+
+org_coord = None
+
+obj_rob_vec = None
+srv_flag = False
+
+send_flag = True
+calib_flag = False
+detect_flag = False
+lines_flag = False
+det_resp_flag = True
+is_calib_flag = False
+
+def closest_point(node, nodes):
+    nodes = np.asarray(nodes)
+    deltas = nodes - node
+    dist_2 = np.einsum('ij,ij->i', deltas, deltas)
+    return np.argmin(dist_2)
+
+#Calculate coordinate of point relative to the robot
+def detect(img):
+    global obj_rob_vec
+    global srv_flag
+    global det_resp_flag
+
+    hsv_frame = cv2.cvtColor(img[0], cv2.COLOR_RGB2HSV)
+
+    low_red = np.array([color_filter[3], color_filter[4], color_filter[5]])
+    high_red = np.array([color_filter[0], color_filter[1], color_filter[2]])
+    red_mask = cv2.inRange(hsv_frame, low_red, high_red)
+
+    red_mask = cv2.bitwise_not(red_mask)
+
+    red_mask = cv2.dilate(red_mask, kernal)
+
+    keypoints = detector_hr.detect(red_mask)
+
+    pnts_img_right = np.zeros((len(keypoints), 2))
+
+    for n in range(len(keypoints)):
+        pnts_img_right[n, 0] = keypoints[n].pt[0]
+        pnts_img_right[n, 1] = keypoints[n].pt[1]
+
+
+    hsv_frame = cv2.cvtColor(img[1], cv2.COLOR_RGB2HSV)
+
+    low_red = np.array([color_filter[3], color_filter[4], color_filter[5]])
+    high_red = np.array([color_filter[0], color_filter[1], color_filter[2]])
+    red_mask = cv2.inRange(hsv_frame, low_red, high_red)
+
+    red_mask = cv2.bitwise_not(red_mask)
+
+    red_mask = cv2.dilate(red_mask, kernal)
+
+    keypoints = detector_hr.detect(red_mask)
+
+    pnts_img_left = np.zeros((len(keypoints), 2))
+
+    for n in range(len(keypoints)):
+        pnts_img_left[n, 0] = keypoints[n].pt[0]
+        pnts_img_left[n, 1] = keypoints[n].pt[1]
+    
+    nmb_obj_l , _ = pnts_img_left.shape
+    nmb_obj_r , _ = pnts_img_right.shape
+
+    if nmb_obj_l == nmb_obj_r:
+
+        objects = np.zeros((nmb_obj_l, 2, 2))
+
+        for i in range(nmb_obj_l):
+            objects[i,0,:] = pnts_img_left[i,:]
+            objects[i,1,:] = pnts_img_right[closest_point(pnts_img_left[i,:], pnts_img_right[:,:]),:]
+
+        obj_rob_vec = np.zeros((nmb_obj_l, 3))
+
+        for i in range(nmb_obj_l):
+            p_4d_obj = cv2.triangulatePoints(PR, PL, objects[i,1,:], objects[i,0,:])
+
+            obj_vec = np.array([p_4d_obj[0] / p_4d_obj[3],
+                                p_4d_obj[1] / p_4d_obj[3],
+                                p_4d_obj[2] / p_4d_obj[3]])
+            
+            mtrx_ret = np.linalg.solve(mtrx, np.subtract(obj_vec, org_coord))
+
+            obj_trns_vec = np.array([np.linalg.norm(mtrx[:,0]*mtrx_ret[0])/10.0, np.linalg.norm(mtrx[:,1]*mtrx_ret[1])/10.0, np.linalg.norm(mtrx[:,2]*mtrx_ret[2])/10.0])
+
+            obj_rob_vec[i,:] = np.add(obj_trns_vec, rob_offset_vec)
+
+            #if mtrx_ret[0] < 0:
+            #    obj_trns_vec[i,0] = - obj_trns_vec[i,0]
+            #if mtrx_ret[1] < 0:
+            #    obj_trns_vec[i,1] = - obj_trns_vec[i,1]
+            #if mtrx_ret[2] < 0:
+            #    obj_trns_vec[i,2] = - obj_trns_vec[i,2]
+    
+        print("---------------")
+        print("Number of bottles: %d" % nmb_obj_l)
+        print("New origin to bottle distance: ")
+        for i in range(nmb_obj_l):
+            print("Bottle %d: %f mm" % (i, np.linalg.norm(obj_rob_vec[i])))
+        print("Object vector to robot: ")
+        for i in range(nmb_obj_l):
+            print("Bottle %d: " % i)
+            print(obj_rob_vec[i])
+        print("---------------")
+
+        srv_flag = True
+        det_resp_flag = True
+
+    else:
+        print(colored("Error: Number of objects doesn't match!", 'red'))
+        srv_flag = True
+        det_resp_flag = False
+
+#Calculate transformation matrix
+def callibrate(img):
+    global mtrx
+    global org_coord
+    global is_calib_flag
+
+    gray = cv2.cvtColor(img[0], cv2.COLOR_BGR2GRAY)
+    corners, ids, rejected = cv2.aruco.detectMarkers(gray, arucoDict, parameters=arucoParams, cameraMatrix=KR, distCoeff=DR)
+    print(corners)
+    if corners is not None:
+        pnts_img[0,ids[0][0],:] = corners[0][0][0]
+        pnts_img[0,ids[1][0],:] = corners[1][0][0]
+        pnts_img[0,ids[2][0],:] = corners[2][0][0]
+
+    gray = cv2.cvtColor(img[1], cv2.COLOR_BGR2GRAY)
+    corners, ids, rejected = cv2.aruco.detectMarkers(gray, arucoDict, parameters=arucoParams, cameraMatrix=KL, distCoeff=DL)
+    if corners is not None:
+        pnts_img[1,ids[0][0],:] = corners[0][0][0]
+        pnts_img[1,ids[1][0],:] = corners[1][0][0]
+        pnts_img[1,ids[2][0],:] = corners[2][0][0]
+
+    p_4d_org = cv2.triangulatePoints(PR, PL, pnts_img[0,0,:], pnts_img[1,0,:])
+    p_4d_x = cv2.triangulatePoints(PR, PL, pnts_img[0,1,:], pnts_img[1,1,:])
+    p_4d_y = cv2.triangulatePoints(PR, PL, pnts_img[0,2,:], pnts_img[1,2,:])
+
+    org_coord = np.array([p_4d_org[0] / p_4d_org[3],
+                          p_4d_org[1] / p_4d_org[3],
+                          p_4d_org[2] / p_4d_org[3]])
+
+    x_coord = np.array([p_4d_x[0] / p_4d_x[3],
+                        p_4d_x[1] / p_4d_x[3],
+                        p_4d_x[2] / p_4d_x[3]])
+
+    y_coord = np.array([p_4d_y[0] / p_4d_y[3],
+                        p_4d_y[1] / p_4d_y[3],
+                        p_4d_y[2] / p_4d_y[3]])
+    
+    x_vec = np.squeeze(np.subtract(x_coord, org_coord)) #TODO: Make sure they point in the right way!
+    y_vec = np.squeeze(np.subtract(y_coord, org_coord))
+
+    z_vec = np.cross(x_vec, y_vec)
+
+    mtrx = np.array([[x_vec[0], y_vec[0], z_vec[0]],
+                     [x_vec[1], y_vec[1], z_vec[1]],
+                     [x_vec[2], y_vec[2], z_vec[2]]])
+
+    config_object["CONFIG"] = {
+        "mtrx_0": str(mtrx[0,0]),
+        "mtrx_1": str(mtrx[0,1]),
+        "mtrx_2": str(mtrx[0,2]),
+        "mtrx_3": str(mtrx[1,0]),
+        "mtrx_4": str(mtrx[1,1]),
+        "mtrx_5": str(mtrx[1,2]),
+        "mtrx_6": str(mtrx[2,0]),
+        "mtrx_7": str(mtrx[2,1]),
+        "mtrx_8": str(mtrx[2,2]),
+
+        "pnts_0": str(pnts_img[0,0,0]),
+        "pnts_1": str(pnts_img[0,0,1]),
+        "pnts_2": str(pnts_img[0,1,0]),
+        "pnts_3": str(pnts_img[0,1,1]),
+        "pnts_4": str(pnts_img[0,2,0]),
+        "pnts_5": str(pnts_img[0,2,1]),
+        "pnts_6": str(pnts_img[1,0,0]),
+        "pnts_7": str(pnts_img[1,0,1]),
+        "pnts_8": str(pnts_img[1,1,0]),
+        "pnts_9": str(pnts_img[1,1,1]),
+        "pnts_10": str(pnts_img[1,2,0]),
+        "pnts_11": str(pnts_img[1,2,1]),
+    }
+
+    with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+        config_object.write(conf)
+
+    print("---------------")
+    print("Callibration successful!")
+    print("Transformation matrix: ")
+    print(mtrx)
+    print("---------------")
+
+    is_calib_flag = True
+
+#RTMP stream
+img_send = None
+
+img_left = cam_left.get_frame()
+img_right = cam_right.get_frame()
+
+frame_l = cv2.resize(img_left, (1080, 720))
+frame_r = cv2.resize(img_right, (1080, 720))
+
+output_img = np.concatenate((frame_l, frame_r), axis=1)
+
+img_send = cv2.cvtColor(output_img, cv2.COLOR_RGB2BGR)
+
+c = threading.Condition()
+
+class Img_Thread(threading.Thread):
+    def __init__(self, name):
+        threading.Thread.__init__(self)
+        self.name = name
+
+    def run(self):
+        global img_send
+
+        rtmp_url = 'rtmp://192.168.1.125:1935/app/live'
+    
+        sizeStr = str(2160) + \
+            'x' + str(1440)
+
+        print("------------------- STR: " + sizeStr)
+        command = ['ffmpeg',
+           '-y',
+           '-f', 'rawvideo',
+           '-vcodec', 'rawvideo',
+           '-pix_fmt', 'bgr24',
+           '-s', sizeStr,
+           '-r', str(25),
+           '-i', '-',
+           '-c:v', 'libx264',
+           '-pix_fmt', 'yuv420p',
+           '-preset', 'ultrafast',
+           '-f', 'flv',
+           rtmp_url]
+
+        process = sp.Popen(command, stdin=sp.PIPE)  
+        while(send_flag):
+            c.acquire()
+            process.stdin.write(img_send.tobytes())
+            c.release()
+            key = cv2.waitKey(30)
+
+t1 = Img_Thread("img_send")
+t1.start()
+
+def get_input():
+    global send_flag
+    global calib_flag
+    global detect_flag
+    global rob_offset_vec
+    global cam_config
+    global color_filter
+
+    while(send_flag):
+        inp = input()
+        if inp == "end":
+            send_flag = False
+            cam_left.end()
+            cam_right.end()
+        elif inp == "calib":
+            calib_flag = True
+        elif inp == "det":
+            detect_flag = True
+        elif inp == "lines":
+            lines_flag = not lines_flag
+        elif inp == "upd":
+            cam_config = rospy.get_param('camera_config')
+            color_filter = rospy.get_param('color_filter')
+
+            config_object["PARAMS"] = {
+                "hh": str(color_filter[0]),
+                "sh": str(color_filter[1]),
+                "vh": str(color_filter[2]),
+                "hl": str(color_filter[3]),
+                "sl": str(color_filter[4]),
+                "vl": str(color_filter[5]),
+            }
+
+            with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+                config_object.write(conf)
+    
+            config_object["CAMERA"] = {
+                "cam_gain": str(cam_config[0]),
+                "cam_exposure": str(cam_config[1]),
+            }
+
+            with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+                config_object.write(conf)
+
+            print("---------------")
+            print("ROS Paramaters loaded!")
+            print("Camera config:")
+            print("Gain: %f Exposure: %f" % (cam_config[0], cam_config[1]))
+            print("HSV Color filter:")
+            print("Upper limit: %d / %d / %d Lower limit: %d / %d / %d" % (color_filter[0], color_filter[1], color_filter[2], color_filter[3], color_filter[4], color_filter[5]))
+            print("---------------")
+        elif inp == "rob":
+            print("Robot offset vector x:")
+            inp = input()
+            rob_offset_vec[0] = float(inp)
+            print("Robot offset vector y:")
+            inp = input()
+            rob_offset_vec[1] = float(inp)
+            print("Robot offset vector z:")
+            inp = input()
+            rob_offset_vec[2] = float(inp)
+
+            rospy.set_param('table_height', int(round(rob_offset_vec[2])))
+
+            config_object["ROBOT"] = {
+            "rob_offset_x": str(rob_offset_vec[0]),
+            "rob_offset_y": str(rob_offset_vec[1]),
+            "rob_offset_z": str(rob_offset_vec[2]),
+            }
+
+            with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+                    config_object.write(conf)
+
+            print(colored("Changes saved!", 'green'))
+        else:
+            print(colored("Error command not found!", 'red'))
+
+input_thread = threading.Thread(target=get_input)
+input_thread.start()
+
+def paramsChangeCallback(data):
+    global color_filter
+
+    msg = str(data.data)
+    sp_msg = msg.split("/")
+
+    color_filter = int(sp_msg)    
+
+    config_object["PARAMS"] = {
+            "hh": str(color_filter[0]),
+            "sh": str(color_filter[1]),
+            "vh": str(color_filter[2]),
+            "hl": str(color_filter[3]),
+            "sl": str(color_filter[4]),
+            "vl": str(color_filter[5]),
+    }
+
+    with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+        config_object.write(conf)
+
+def camGainCallback(data):
+    global cam_config
+
+    cam_config[0] = data.data
+    cam_left.change_params()
+    cam_right.change_params()
+    print("Gain changed!")
+
+    config_object["CAMERA"] = {
+            "cam_gain": str(cam_config[0]),
+            "cam_exposure": str(cam_config[1]),
+    }
+
+    with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+        config_object.write(conf)
+
+def camExposureCallback(data):
+    global cam_config
+
+    cam_config[1] = data.data
+    cam_left.change_params()
+    cam_right.change_params()
+    print("Exposure changed!")
+
+    config_object["CAMERA"] = {
+            "cam_gain": str(cam_config[0]),
+            "cam_exposure": str(cam_config[1]),
+    }
+
+    with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+        config_object.write(conf)
+
+def update_params(msg):
+    global cam_config
+    global color_filter
+
+    cam_config = rospy.get_param('camera_config')
+    color_filter = rospy.get_param('color_filter')
+
+    cam_left.change_params()
+    cam_right.change_params()
+
+    config_object["PARAMS"] = {
+            "hh": str(color_filter[0]),
+            "sh": str(color_filter[1]),
+            "vh": str(color_filter[2]),
+            "hl": str(color_filter[3]),
+            "sl": str(color_filter[4]),
+            "vl": str(color_filter[5]),
+    }
+
+    with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+        config_object.write(conf)
+    
+    config_object["CAMERA"] = {
+            "cam_gain": str(cam_config[0]),
+            "cam_exposure": str(cam_config[1]),
+    }
+
+    with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+        config_object.write(conf)
+
+    print("---------------")
+    print(colored("ROS Paramaters loaded!", 'green'))
+    print("Camera config:")
+    print("Gain: %f Exposure: %f" % (cam_config[0], cam_config[1]))
+    print("HSV Color filter:")
+    print("Upper limit: %d / %d / %d Lower limit: %d / %d / %d" % (color_filter[0], color_filter[1], color_filter[2], color_filter[3], color_filter[4], color_filter[5]))
+    print("---------------")
+
+rospy.Subscriber("nsra/configurator_update", String, update_params)
+rospy.Subscriber("nsra/bd_params", String, paramsChangeCallback)
+rospy.Subscriber("nsra/cam_gain", Float32, camGainCallback)
+rospy.Subscriber("nsra/cam_exposure", Float32, camExposureCallback)
+pub = rospy.Publisher('nsra/stereo_camera_coords', stereo_camera_coords)
+left_img_pub = rospy.Publisher('nsra/stereo_camera_left', Image, queue_size=1)
+right_img_pub = rospy.Publisher('nsra/stereo_camera_right', Image, queue_size=1)
+
+br = CvBridge()
+
+def coords_publisher():
+    global obj_rob_vec
+    global srv_flag
+    global detect_flag
+    global send_flag
+
+    while(send_flag):
+
+        detect_flag = True
+        while(srv_flag is False and send_flag):
+            time.sleep(0.1)
+        srv_flag = False
+
+        if(det_resp_flag):
+            msg = stereo_camera_coords()
+            msg.x = tuple(obj_rob_vec[:,0])
+            msg.y = tuple(obj_rob_vec[:,1])
+            msg.z = tuple(obj_rob_vec[:,2])
+            pub.publish(msg)
+        
+        time.sleep(1)
+
+input_thread = threading.Thread(target=coords_publisher)
+input_thread.start()
+
+test_nb = 0
+
+while(send_flag):
+    test_nb += 1
+    #Get next image from cameras
+    img_left = cam_left.get_frame(1)
+    img_right = cam_right.get_frame(1)
+
+    #Undistort rectify images
+    img_left_remaped = cv2.remap(img_left,Left_Stereo_Map[0],Left_Stereo_Map[1], cv2.INTER_LANCZOS4, cv2.BORDER_CONSTANT, 0)
+    img_right_remaped = cv2.remap(img_right,Right_Stereo_Map[0],Right_Stereo_Map[1], cv2.INTER_LANCZOS4, cv2.BORDER_CONSTANT, 0)
+
+    gray = cv2.cvtColor(img_left_remaped, cv2.COLOR_BGR2GRAY)
+    corners_left, ids, rejected = cv2.aruco.detectMarkers(gray, arucoDict, parameters=arucoParams, cameraMatrix=KR, distCoeff=DR)
+    gray = cv2.cvtColor(img_right_remaped, cv2.COLOR_BGR2GRAY)
+    corners_right, ids, rejected = cv2.aruco.detectMarkers(gray, arucoDict, parameters=arucoParams, cameraMatrix=KR, distCoeff=DR)
+
+    #img_left_remaped = cv2.aruco.drawDetectedMarkers(img_left_remaped, corners_left)
+    #img_right_remaped = cv2.aruco.drawDetectedMarkers(img_right_remaped, corners_right)
+
+    img_left_sized = cv2.resize(img_left_remaped, (1080, 720))
+    img_right_sized = cv2.resize(img_right_remaped, (1080, 720))
+
+    #blur_frame_left = cv2.GaussianBlur(img_left, (5,5), 1)
+    #blur_frame_right = cv2.GaussianBlur(img_right, (5,5), 1)
+
+    hsv_frame_left = cv2.cvtColor(img_left_sized, cv2.COLOR_RGB2HSV)
+    hsv_frame_right = cv2.cvtColor(img_right_sized, cv2.COLOR_RGB2HSV)
+
+    low_red = np.array([color_filter[3], color_filter[4], color_filter[5]])
+    high_red = np.array([color_filter[0], color_filter[1], color_filter[2]])
+    red_mask_left = cv2.inRange(hsv_frame_left, low_red, high_red)
+    red_mask_right = cv2.inRange(hsv_frame_right, low_red, high_red)
+
+    red_mask_left = cv2.bitwise_not(red_mask_left)
+    red_mask_right = cv2.bitwise_not(red_mask_right)
+
+    red_mask_left = cv2.dilate(red_mask_left, kernal)
+    red_mask_right = cv2.dilate(red_mask_right, kernal)
+
+    keypoints_left = detector.detect(red_mask_left)
+    keypoints_right = detector.detect(red_mask_right)
+
+    imgKeyPoints_left = cv2.drawKeypoints(red_mask_left, keypoints_left, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    imgKeyPoints_right = cv2.drawKeypoints(red_mask_right, keypoints_right, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    imgKeyPoints_left = cv2.drawKeypoints(imgKeyPoints_left, keypoints_right, np.array([]), (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    imgKeyPoints_right = cv2.drawKeypoints(imgKeyPoints_right, keypoints_left, np.array([]), (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+    blur_frame_points_left = cv2.drawKeypoints(img_left_sized, keypoints_left, np.array([]), (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    blur_frame_points_right = cv2.drawKeypoints(img_right_sized, keypoints_right, np.array([]), (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+    #Draw world origin
+    blur_frame_points_right = cv2.circle(blur_frame_points_right, (int(round(pnts_img[0,0,0]*1080/3088)), int(round(pnts_img[0,0,1]*720/2064))), radius=3, color=(0, 0, 255), thickness=-1)
+    blur_frame_points_right = cv2.circle(blur_frame_points_right, (int(round(pnts_img[0,1,0]*1080/3088)), int(round(pnts_img[0,1,1]*720/2064))), radius=3, color=(0, 0, 255), thickness=-1)
+    blur_frame_points_right = cv2.circle(blur_frame_points_right, (int(round(pnts_img[0,2,0]*1080/3088)), int(round(pnts_img[0,2,1]*720/2064))), radius=3, color=(0, 0, 255), thickness=-1)
+
+    left_img_pub.publish(br.cv2_to_imgmsg(blur_frame_points_left))
+    right_img_pub.publish(br.cv2_to_imgmsg(blur_frame_points_right))
+
+    cv2.putText(blur_frame_points_left, str(test_nb),(50,50),cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+    #Draw horizontal lines
+    if lines_flag:
+        for line in range(0, int(blur_frame_points_right.shape[0]/20)):
+            blur_frame_points_left[line*20,:] = (0,255,0,0)
+            blur_frame_points_right[line*20,:] = (0,255,0,0)
+
+    #Concatenate left and right image
+    blur_out_img = np.concatenate((blur_frame_points_left, blur_frame_points_right), axis=1)
+    mask_out_img = np.concatenate((imgKeyPoints_left, imgKeyPoints_right), axis=1)
+    output_img = np.concatenate((blur_out_img, mask_out_img), axis=0)
+
+    c.acquire()
+    img_send = output_img
+    c.release()
+
+    if calib_flag:
+        calib_flag = False
+        callibrate([img_right_remaped, img_left_remaped])
+    elif detect_flag and is_calib_flag:
+        detect_flag = False
+        input_thread = threading.Thread(target=detect, args=([img_right_remaped, img_left_remaped],))
+        input_thread.start()

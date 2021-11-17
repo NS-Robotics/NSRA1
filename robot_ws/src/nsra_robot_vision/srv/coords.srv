@@ -1,0 +1,6 @@
+#request
+int16 test
+---
+#response
+float32 x
+float32 y

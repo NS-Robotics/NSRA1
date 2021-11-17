@@ -1,0 +1,10 @@
+<launch>
+
+  <arg name="debug" default="false" />
+
+  <include file="$(find nsra_moveit_config_new)/launch/moveit_rviz.launch">
+    <arg name="rviz_config" value="$(find nsra_moveit_config_new)/launch/moveit.rviz"/>
+    <arg name="debug" value="$(arg debug)"/>
+  </include>
+  
+</launch>

@@ -1,0 +1,255 @@
+#!/usr/bin/python3
+
+############################################################################# 
+#  BSD 3-Clause License
+# 
+#  Copyright (c) 2020, Noa Sendlhofer
+#  All rights reserved.
+# 
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions are met:
+# 
+#  1. Redistributions of source code must retain the above copyright notice, this
+#     list of conditions and the following disclaimer.
+# 
+#  2. Redistributions in binary form must reproduce the above copyright notice,
+#     this list of conditions and the following disclaimer in the documentation
+#     and/or other materials provided with the distribution.
+# 
+#  3. Neither the name of the copyright holder nor the names of its
+#     contributors may be used to endorse or promote products derived from
+#     this software without specific prior written permission.
+# 
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+#  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+#  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+#  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+#  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+#  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+#  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+#  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+#  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+############################################################################# 
+
+# Author: Noa Sendlhofer
+# Desc:   Part of the NSRA Robot Vision stack. Stereo camera test program using an NDI source.
+# 01.01.2021 - Stereo camera works! :)
+
+import cv2
+import nsra_pyndi.finder as finder
+import nsra_pyndi.receiver as receiver
+import nsra_pyndi.lib as lib
+import subprocess as sp
+import numpy as np
+import math
+import rospkg
+import threading
+
+#rospack
+rospack = rospkg.RosPack()
+pack_path = rospack.get_path('nsra_robot_vision')
+
+#config
+#Projection
+PR = None
+PL = None
+#Intrinsics
+KR = None
+KL = None
+#Distortion
+DR = None
+DL = None
+#Rotation
+RR = None
+RL = None
+
+try:
+    fs = cv2.FileStorage(pack_path + "/config/cam_stereo.yml", cv2.FILE_STORAGE_READ)
+    PR = fs.getNode("PR").mat()
+    PL = fs.getNode("PL").mat()
+    KR = fs.getNode("KR").mat()
+    KL = fs.getNode("KL").mat()
+    DR = fs.getNode("DR").mat()
+    DL = fs.getNode("DL").mat()
+    RR = fs.getNode("RR").mat()
+    RL = fs.getNode("RL").mat()
+except:
+    print("Error no config file found!")
+    quit()
+
+if PR.any() == None or PL.any() == None:
+    print("Error config file not valid!")
+    quit()
+
+try:
+    chessImg = cv2.imread(pack_path + "/images/left1.jpg")
+    imsize = (chessImg.shape[1], chessImg.shape[0])
+except:
+    print("Error no valid image found in the /image folder!")
+    quit()
+
+# initUndistortRectifyMap 
+Left_Stereo_Map= cv2.initUndistortRectifyMap(KL, DL, RL, PL,
+                                             imsize, cv2.CV_16SC2)
+Right_Stereo_Map= cv2.initUndistortRectifyMap(KR, DR, RR, PR,
+                                              imsize, cv2.CV_16SC2)
+
+#temporary! - NDI stream names
+rcam_name = "PC-NOA (TV0200110012)"
+lcam_name = "PC-NOA (TV0200110013)"
+
+#CBC detection
+criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+
+#World origin of cameras relative to the robot
+origin_img = np.array([[0.0,0.0],
+                       [0.0,0.0]])
+origin_vec = np.array([0.0,0.0,0.0])
+
+# Create StereoSGBM and prepare all parameters
+window_size = 3
+min_disp = 2
+num_disp = 130-min_disp
+stereo = cv2.StereoSGBM_create(minDisparity = min_disp,
+    numDisparities = num_disp,
+    blockSize = window_size,
+    uniquenessRatio = 10,
+    speckleWindowSize = 100,
+    speckleRange = 32,
+    disp12MaxDiff = 5,
+    P1 = 8*3*window_size**2,
+    P2 = 32*3*window_size**2)
+
+# Used for the filtered image
+stereoR=cv2.ximgproc.createRightMatcher(stereo) # Create another stereo for right this time
+
+# WLS FILTER Parameters
+lmbda = 80000
+sigma = 1.8
+visual_multiplier = 1.0
+ 
+wls_filter = cv2.ximgproc.createDisparityWLSFilter(matcher_left=stereo)
+wls_filter.setLambda(lmbda)
+wls_filter.setSigmaColor(sigma)
+
+# Filtering
+kernel= np.ones((3,3),np.uint8)
+
+#NDI camera class
+class Camera():
+    def __init__(self, camera):
+        find = finder.create_ndi_finder()
+        NDIsources = find.get_sources()
+        self.cam_source = None
+        elapsed_time = 0.0
+        while len(NDIsources) < 2:
+            print("Looking for cameras")
+            if elapsed_time >= 5.0:
+                print("Timeout - Not all cameras detected!")
+                quit()
+            NDIsources = find.get_sources()
+            print(NDIsources)
+            elapsed_time += 1
+        for i in NDIsources:
+            if i.name == camera:
+                self.cam_source = i
+                break
+        if self.cam_source == None:
+            print("Detected cameras don't match with the input names")
+            quit()
+        else:
+            self.camera = receiver.create_receiver(self.cam_source)
+            print("Camera " + self.cam_source.name + " initialized")
+    
+    def get_frame(self):
+        return self.camera.read()
+
+    def get_name(self):
+        return self.cam_source.name
+
+#Create camera instances
+right_cam = Camera(rcam_name)
+left_cam = Camera(lcam_name)
+
+rtmp_url = 'rtmp://192.168.1.174:1935/app/live'
+
+sizeStr = str(1080) + \
+    'x' + str(720)
+
+print("------------------- STR: " + sizeStr)
+command = ['ffmpeg',
+           '-y',
+           '-f', 'rawvideo',
+           '-vcodec', 'rawvideo',
+           '-pix_fmt', 'bgr24',
+           '-s', sizeStr,
+           '-r', str(30),
+           '-i', '-',
+           '-c:v', 'libx264',
+           '-pix_fmt', 'yuv420p',
+           '-preset', 'ultrafast',
+           '-f', 'flv',
+           rtmp_url]
+
+process = sp.Popen(command, stdin=sp.PIPE)
+
+while(True):
+    #Get next image from cameras
+    img_left = left_cam.get_frame()
+    img_right = right_cam.get_frame()
+
+    #Undistort rectify images
+    img_left = cv2.remap(img_left,Left_Stereo_Map[0],Left_Stereo_Map[1], cv2.INTER_LANCZOS4, cv2.BORDER_CONSTANT, 0)
+    img_right = cv2.remap(img_right,Right_Stereo_Map[0],Right_Stereo_Map[1], cv2.INTER_LANCZOS4, cv2.BORDER_CONSTANT, 0)
+
+    # Convert from color(BGR) to gray
+    grayR = cv2.cvtColor(img_right,cv2.COLOR_BGR2GRAY)
+    grayL = cv2.cvtColor(img_left,cv2.COLOR_BGR2GRAY)
+
+    # Compute the 2 images for the Depth_image
+    disp  = stereo.compute(grayL,grayR)#.astype(np.float32)/ 16
+    dispL = disp
+    dispR = stereoR.compute(grayR,grayL)
+    dispL = np.int16(dispL)
+    dispR = np.int16(dispR)
+
+    # Using the WLS filter
+    filteredImg = wls_filter.filter(dispL,grayL,None,dispR)
+    filteredImg = cv2.normalize(src=filteredImg, dst=filteredImg, beta=0, alpha=255, norm_type=cv2.NORM_MINMAX)
+    filteredImg = np.uint8(filteredImg)
+    #cv2.imshow('Disparity Map', filteredImg)
+    disp= ((disp.astype(np.float32)/ 16)-min_disp)/num_disp # Calculation allowing us to have 0 for the most distant object able to detect
+
+    # Resize the image for faster executions
+    #dispR= cv2.resize(disp,None,fx=0.3, fy=0.3, interpolation = cv2.INTER_AREA)
+
+    # Filtering the Results with a closing filter
+    #closing= cv2.morphologyEx(disp,cv2.MORPH_CLOSE, kernel) # Apply an morphological filter for closing little "black" holes in the picture(Remove noise) 
+
+    # Colors map
+    #dispc= (closing-closing.min())*255
+    #dispC= dispc.astype(np.uint8)                                   # Convert the type of the matrix from float32 to uint8, this way you can show the results with the function cv2.imshow()
+    #disp_Color= cv2.applyColorMap(dispC,cv2.COLORMAP_OCEAN)         # Change the Color of the Picture into an Ocean Color_Map
+    filt_Color= cv2.applyColorMap(filteredImg,cv2.COLORMAP_OCEAN) 
+    filt_Color = cv2.resize(filt_Color, (1080, 720))
+    # Show the result for the Depth_image
+    #cv2.imshow('Disparity', disp)
+    #cv2.imshow('Closing',closing)
+    #cv2.imshow('Color Depth',disp_Color)
+    process.stdin.write(filt_Color.tobytes())
+    #cv2.imshow('Filtered Color Depth',filt_Color)
+
+    #Concatenate left and right image
+    #output_img = np.concatenate((frame_l, frame_r), axis=1)
+
+    #Show concentated frame
+    #cv2.imshow('left and right camera', output_img)
+
+    #Wait for user input
+    key = cv2.waitKey(50)
+    if key == 27:
+        print("User Quit")
+        break
+
+cv2.destroyAllWindows()

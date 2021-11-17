@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>nsra_gxipy</name>
+  <version>0.0.0</version>
+  <description>The nsra_gxipy package</description>
+  <maintainer email="noa.sendlhofer@gmail.com">Noa Sendlhofer</maintainer>
+
+  <license>TODO</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <exec_depend>rospy</exec_depend>
+
+
+  <export>
+  </export>
+</package>

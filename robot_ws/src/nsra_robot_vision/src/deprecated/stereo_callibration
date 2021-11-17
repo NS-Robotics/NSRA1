@@ -1,0 +1,142 @@
+#!/usr/bin/python
+import cv2
+import numpy as np
+import rospkg
+
+rospack = rospkg.RosPack()
+
+cap1 = cv2.VideoCapture("rtsp://192.168.1.171")
+cap2 = cv2.VideoCapture("rtsp://192.168.1.102")
+
+fs1 = cv2.FileStorage(rospack.get_path('nsra_robot_vision') + "/camera1_conf.xml", cv2.FILE_STORAGE_READ)
+fs2 = cv2.FileStorage(rospack.get_path('nsra_robot_vision') + "/camera2_conf.xml", cv2.FILE_STORAGE_READ)
+
+i_points = np.float32([[0  ,  0 , 0],
+                       [0  , 25 , 0],
+                       [0  , 50 , 0],
+                       [0  , 75 , 0],
+                       [0  , 100, 0],
+                       [0  , 125, 0],
+                       [25 , 0  , 0],
+                       [25 , 25 , 0],
+                       [25 , 50 , 0],
+                       [25 , 75 , 0],
+                       [25 , 100, 0],
+                       [25 , 125, 0],
+                       [50 , 0  , 0],
+                       [50 , 25 , 0],
+                       [50 , 50 , 0],
+                       [50 , 75 , 0],
+                       [50 , 100, 0],
+                       [50 , 125, 0],
+                       [75 , 0  , 0],
+                       [75 , 25 , 0],
+                       [75 , 50 , 0],
+                       [75 , 75 , 0],
+                       [75 , 100, 0],
+                       [75 , 125, 0],
+                       [100, 0  , 0],
+                       [100, 25 , 0],
+                       [100, 50 , 0],
+                       [100, 75 , 0],
+                       [100, 100, 0],
+                       [100, 125, 0],
+                       [125, 0  , 0],
+                       [125, 25 , 0],
+                       [125, 50 , 0],
+                       [125, 75 , 0],
+                       [125, 100, 0],
+                       [125, 125, 0],
+                       [150, 0  , 0],
+                       [150, 25 , 0],
+                       [150, 50 , 0],
+                       [150, 75 , 0],
+                       [150, 100, 0],
+                       [150, 125, 0],
+                       [175, 0  , 0],
+                       [175, 25 , 0],
+                       [175, 50 , 0],
+                       [175, 75 , 0],
+                       [175, 100, 0],
+                       [175, 125, 0],
+                       [200, 0  , 0],
+                       [200, 25 , 0],
+                       [200, 50 , 0],
+                       [200, 75 , 0],
+                       [200, 100, 0],
+                       [200, 125, 0]])
+
+K1 = fs1.getNode("Camera_Matrix").mat()
+dist_coef1 = fs1.getNode("Distortion_Coefficients").mat()
+
+K2 = fs2.getNode("Camera_Matrix").mat()
+dist_coef2 = fs2.getNode("Distortion_Coefficients").mat()
+
+while True:
+    _, frame1 = cap1.read()
+    _, frame2 = cap2.read()
+
+    blur_frame1 = cv2.GaussianBlur(frame1, (5,5), 1)
+    hsv_frame1 = cv2.cvtColor(blur_frame1, cv2.COLOR_BGR2HSV)
+
+    blur_frame2 = cv2.GaussianBlur(frame2, (5,5), 1)
+    hsv_frame2 = cv2.cvtColor(blur_frame2, cv2.COLOR_BGR2HSV)
+
+    retval1, corners1 = cv2.findChessboardCorners(blur_frame1, (6,9), flags=cv2.CALIB_CB_FAST_CHECK)
+    retval2, corners2 = cv2.findChessboardCorners(blur_frame2, (6,9), flags=cv2.CALIB_CB_FAST_CHECK)
+
+    if retval1:
+        r,g,b=cv2.split(blur_frame1)
+        criteria = (cv2.TermCriteria_EPS + cv2.TermCriteria_MAX_ITER, 30, 0.1)
+        cv2.cornerSubPix(r, corners1, (11,11), (-1,-1), criteria)
+
+    if retval2:
+        r,g,b=cv2.split(blur_frame2)
+        criteria = (cv2.TermCriteria_EPS + cv2.TermCriteria_MAX_ITER, 30, 0.1)
+        cv2.cornerSubPix(r, corners2, (11,11), (-1,-1), criteria)
+
+    cv2.drawChessboardCorners(blur_frame1, (6,9), corners1, retval1)
+    cv2.drawChessboardCorners(blur_frame2, (6,9), corners2, retval2)
+
+    #print(corners)
+
+    cv2.imshow("Frame1", blur_frame1)
+    cv2.imshow("Frame2", blur_frame2)
+
+    key = cv2.waitKey(1)
+    if key == 27:
+        c1_points = corners1.reshape(corners1.shape[0],corners1.shape[2])
+        c2_points = corners2.reshape(corners2.shape[0],corners2.shape[2])
+
+        c1_points.astype(np.float32)
+        c2_points.astype(np.float32)
+        i_points.astype(np.float32)
+
+        gray = cv2.cvtColor(blur_frame1,cv2.COLOR_BGR2GRAY)
+
+        print(c1_points)
+        print(c2_points)
+        print(i_points)
+
+        ret, matrix, dist, rvecs, tvecs = cv2.calibrateCamera(c1_points, i_points, (1280,720), None, None)
+
+        #R, T, E, F = cv2.stereoCalibrate(i_points, c1_points, c2_points, K1, dist_coef1, K2, dist_coef2, (1280,720), flags=cv2.CALIB_FIX_INTRINSIC)
+
+        _ret1, rvec1, tvec1 = cv2.solvePnP(i_points, c1_points, K1, dist_coef1)
+        _ret2, rvec2, tvec2 = cv2.solvePnP(i_points, c2_points, K2, dist_coef2)
+
+        rotM1 = cv2.Rodrigues(rvec1)[0]
+        rotM2 = cv2.Rodrigues(rvec2)[0]
+
+        cameraPosition1 = -np.matrix(rotM1).T * np.matrix(tvec1)
+        cameraPosition2 = -np.matrix(rotM2).T * np.matrix(tvec2)
+
+        print(i_points)
+
+        
+        print(R)
+        print(T)
+        print(E)
+        print(F)
+        break
+        

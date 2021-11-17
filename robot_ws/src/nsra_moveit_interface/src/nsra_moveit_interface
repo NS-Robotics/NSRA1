@@ -1,0 +1,381 @@
+#!/usr/bin/env python3
+
+# Software License Agreement (BSD License)
+#
+# Copyright (c) 2013, SRI International
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#
+#  * Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+#  * Redistributions in binary form must reproduce the above
+#    copyright notice, this list of conditions and the following
+#    disclaimer in the documentation and/or other materials provided
+#    with the distribution.
+#  * Neither the name of SRI International nor the names of its
+#    contributors may be used to endorse or promote products derived
+#    from this software without specific prior written permission.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+# FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+# COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+# INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+# BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+# ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+#
+# Author: Acorn Pooley, Mike Lautman
+
+import sys
+import copy
+import tf
+import rospy
+import time
+import moveit_commander
+import moveit_msgs.msg
+import geometry_msgs.msg
+from math import pi
+import math
+from std_msgs.msg import String
+from std_msgs.msg import Int16
+from moveit_commander.conversions import pose_to_list
+from nsra_odrive_interface.msg import bd_robot_coords
+from tf.transformations import euler_from_quaternion, quaternion_from_euler
+
+def all_close(goal, actual, tolerance):
+
+  all_equal = True
+  if type(goal) is list:
+    for index in range(len(goal)):
+      if abs(actual[index] - goal[index]) > tolerance:
+        return False
+
+  elif type(goal) is geometry_msgs.msg.PoseStamped:
+    return all_close(goal.pose, actual.pose, tolerance)
+
+  elif type(goal) is geometry_msgs.msg.Pose:
+    return all_close(pose_to_list(goal), pose_to_list(actual), tolerance)
+
+  return True
+
+
+class MoveGroupPythonIntefaceTutorial(object):
+  """MoveGroupPythonInteface"""
+  def __init__(self):
+    super(MoveGroupPythonIntefaceTutorial, self).__init__()
+
+    moveit_commander.roscpp_initialize(sys.argv)
+    rospy.init_node('nsra_moveit_interface')
+
+    robot = moveit_commander.RobotCommander()
+
+    scene = moveit_commander.PlanningSceneInterface()
+
+    group_name = "nsra"
+    move_group = moveit_commander.MoveGroupCommander(group_name)
+
+    display_trajectory_publisher = rospy.Publisher('/move_group/display_planned_path',
+                                                   moveit_msgs.msg.DisplayTrajectory,
+                                                   queue_size=20)
+
+    planning_frame = move_group.get_planning_frame()
+    print("============ Planning frame: %s" % planning_frame)
+
+    eef_link = move_group.get_end_effector_link()
+    print("============ End effector link: %s" % eef_link)
+
+    group_names = robot.get_group_names()
+    print("============ Available Planning Groups:", robot.get_group_names())
+
+    print("============ Printing robot state")
+    print(robot.get_current_state())
+    print("")
+
+    self.box_name = ''
+    self.robot = robot
+    self.scene = scene
+    self.move_group = move_group
+    self.display_trajectory_publisher = display_trajectory_publisher
+    self.planning_frame = planning_frame
+    self.eef_link = eef_link
+    self.group_names = group_names
+
+  def print_robot_info(self):
+    print(self.robot.get_current_state())
+
+  def go_to_joint_state(self, a1, a2, a3, a4, a5, a6):
+
+    move_group = self.move_group
+
+    move_group.set_max_velocity_scaling_factor(1.0)
+    move_group.set_max_acceleration_scaling_factor(1.0)
+
+    joint_goal = move_group.get_current_joint_values()
+    joint_goal[0] = a1
+    joint_goal[1] = a2
+    joint_goal[2] = a3
+    joint_goal[3] = a4
+    joint_goal[4] = a5
+    joint_goal[5] = a6
+
+    move_group.go(joint_goal, wait=True)
+
+    move_group.stop()
+
+    current_joints = move_group.get_current_joint_values()
+    return all_close(joint_goal, current_joints, 0.01)
+
+  def go_to_pose_goal(self, x, y, z, rot):
+
+    move_group = self.move_group
+
+    move_group.set_max_velocity_scaling_factor(1.0)
+    move_group.set_max_acceleration_scaling_factor(1.0)
+
+    pose_goal = move_group.get_current_pose().pose
+
+    rot_list =[pose_goal.orientation.x, pose_goal.orientation.y, pose_goal.orientation.z, pose_goal.orientation.w]
+    rx, ry, rz = euler_from_quaternion(rot_list)
+    rx += rot
+    quat = quaternion_from_euler(rx, ry, rz)
+    pose_goal.orientation.x = quat[0]
+    pose_goal.orientation.y = quat[1]
+    pose_goal.orientation.z = quat[2]
+    pose_goal.orientation.w = quat[3]
+    pose_goal.position.x = x
+    pose_goal.position.y = y
+    pose_goal.position.z = z
+
+
+    move_group.set_pose_target(pose_goal)
+
+    plan = move_group.go(wait=True)
+    move_group.stop()
+    move_group.clear_pose_targets()
+
+    current_pose = self.move_group.get_current_pose().pose
+    return all_close(pose_goal, current_pose, 0.01)
+
+  def plan_cartesian_path(self, scale=1):
+    # Copy class variables to local variables to make the web tutorials more clear.
+    # In practice, you should use the class variables directly unless you have a good
+    # reason not to.
+    move_group = self.move_group
+
+    ## BEGIN_SUB_TUTORIAL plan_cartesian_path
+    ##
+    ## Cartesian Paths
+    ## ^^^^^^^^^^^^^^^
+    ## You can plan a Cartesian path directly by specifying a list of waypoints
+    ## for the end-effector to go through. If executing  interactively in a
+    ## Python shell, set scale = 1.0.
+    ##
+    waypoints = []
+
+    wpose = move_group.get_current_pose().pose
+    print(tf.transformations.euler_from_quaternion([wpose.orientation.x, wpose.orientation.y, wpose.orientation.z, wpose.orientation.w]))
+    #wpose.position.z -= scale * 0.1  # First move up (z)
+    #wpose.position.y += scale * 0.3  # and sideways (y)
+    wpose.position.x += scale * 0.2
+    waypoints.append(copy.deepcopy(wpose))
+
+    wpose.position.z -= scale * 0.4
+    waypoints.append(copy.deepcopy(wpose))
+
+    wpose.position.x -= scale * 0.4
+    waypoints.append(copy.deepcopy(wpose))
+
+    wpose.position.z += scale * 0.4
+    waypoints.append(copy.deepcopy(wpose))
+
+    wpose.position.x += scale * 0.2
+    waypoints.append(copy.deepcopy(wpose))
+
+    #wpose.position.x += scale * 0.2  # Second move forward/backwards in (x)
+    #quaternion = tf.transformations.quaternion_from_euler(1.5708, 0.5, 1)
+    #wpose.orientation.x = quaternion[0]
+    #wpose.orientation.y = quaternion[1]
+    #wpose.orientation.z = quaternion[2]
+    #wpose.orientation.w = quaternion[3]
+    #waypoints.append(copy.deepcopy(wpose))
+
+    # We want the Cartesian path to be interpolated at a resolution of 1 cm
+    # which is why we will specify 0.01 as the eef_step in Cartesian
+    # translation.  We will disable the jump threshold by setting it to 0.0,
+    # ignoring the check for infeasible jumps in joint space, which is sufficient
+    # for this tutorial.
+    (plan, fraction) = move_group.compute_cartesian_path(
+                                       waypoints,   # waypoints to follow
+                                       0.01,        # eef_step
+                                       0.0)         # jump_threshold
+
+    # Note: We are just planning, not asking move_group to actually move the robot yet:
+    return plan, fraction
+
+    ## END_SUB_TUTORIAL
+
+  def display_trajectory(self, plan):
+
+    robot = self.robot
+    display_trajectory_publisher = self.display_trajectory_publisher
+
+    display_trajectory = moveit_msgs.msg.DisplayTrajectory()
+    display_trajectory.trajectory_start = robot.get_current_state()
+    display_trajectory.trajectory.append(plan)
+    display_trajectory_publisher.publish(display_trajectory)
+
+  def execute_plan(self, plan):
+
+    move_group = self.move_group
+
+    move_group.execute(plan, wait=True)
+
+pub = rospy.Publisher('/nsra/gripper_command', Int16, queue_size=10)
+
+def robot_grasp(data):
+  tutorial = MoveGroupPythonIntefaceTutorial()
+  tutorial.go_to_pose_goal(data.x/1000, data.y/1000, data.z/1000, 0)
+  tutorial.print_robot_info()
+  tutorial.go_to_pose_goal(data.x/1000 + 0.165, data.y/1000, data.z/1000, 0)
+  pub.publish(0)
+  tutorial.go_to_pose_goal(data.x/1000, data.y/1000, data.z/1000 + 0.25, 0)
+  tutorial.go_to_pose_goal(555.0/1000 - 0.165, 355.0/1000 + 0.09, 500.0/1000, 0)
+  tutorial.go_to_pose_goal(555.0/1000 - 0.165, 355.0/1000 + 0.09, 500.0/1000, 90)
+  time.sleep(5)
+  tutorial.go_to_pose_goal(data.x/1000, data.y/1000, data.z/1000 + 0.25, -90)
+  tutorial.go_to_pose_goal(data.x/1000 + 0.165, data.y/1000, data.z/1000, 0)
+  time.sleep(1)
+  pub.publish(1)
+  tutorial.go_to_pose_goal(data.x/1000, data.y/1000, data.z/1000, 0)
+  tutorial.go_to_joint_state()
+
+def robot_grasp_test(data):
+  tutorial = MoveGroupPythonIntefaceTutorial()
+  tutorial.go_to_pose_goal(555.0/1000 - 0.165, 355.0/1000, 350.0/1000, 0)
+  tutorial.print_robot_info()
+  tutorial.go_to_pose_goal(555.0/1000, 355.0/1000, 350.0/1000, 0)
+  pub.publish(0)
+  tutorial.go_to_pose_goal(555.0/1000 - 0.165, 355.0/1000, 400.0/1000 + 0.25, 0)
+  tutorial.go_to_pose_goal(400.0/1000, 100.0/1000 + 0.09, 400.0/1000, 0)
+  tutorial.go_to_pose_goal(400.0/1000, 100.0/1000 + 0.09, 400.0/1000, 90)
+  time.sleep(5)
+  tutorial.go_to_pose_goal(555.0/1000 - 0.165, 355.0/1000, 350.0/1000 + 0.25, -90)
+  tutorial.go_to_pose_goal(555.0/1000, 355.0/1000, 350.0/1000, 0)
+  time.sleep(1)
+  pub.publish(1)
+  tutorial.go_to_pose_goal(555.0/1000 - 0.165, 355.0/1000, 350.0/1000, 0)
+  tutorial.go_to_joint_state(-0.57385)
+
+def joint_test(data):
+  tutorial = MoveGroupPythonIntefaceTutorial()
+  tutorial.go_to_pose_goal(70.0 / 1000, -50.0 / 1000, 330.0 / 1000, -1.5707)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(220.0 / 1000, -50.0 / 1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(370.0 / 1000, -50.0 / 1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(520.0 / 1000, -50.0 / 1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(300.0 / 1000, 100.0 / 1000, 450.0 / 1000, 0)
+  time.sleep(2)
+  tutorial.go_to_pose_goal(220.0 / 1000, 100.0 /1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(370.0 / 1000, 100.0 /1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(520.0 / 1000, 100.0 /1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(300.0 / 1000, 250.0 / 1000, 450.0 / 1000, 0)
+  time.sleep(2)
+  tutorial.go_to_pose_goal(220.0 / 1000, 250.0 / 1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(370.0 / 1000, 250.0 / 1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(520.0 / 1000, 250.0 / 1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(300.0 / 1000, 400.0 / 1000, 450.0 / 1000, 0)
+  time.sleep(2)
+  tutorial.go_to_pose_goal(220.0 / 1000, 400.0 / 1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(370.0 / 1000, 400.0 / 1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(520.0 / 1000, 400.0 / 1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(300.0 / 1000, 550.0 / 1000, 450.0 / 1000, 0)
+  time.sleep(2)
+  tutorial.go_to_pose_goal(80.0 / 1000, 550.0 / 1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(220.0 / 1000, 550.0 / 1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(370.0 / 1000, 550.0 / 1000, 330.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(520.0 / 1000, 550.0 / 1000, 330.0 / 1000, 0)
+
+def joint_test_height(data):
+  tutorial = MoveGroupPythonIntefaceTutorial()
+  tutorial.go_to_pose_goal(220.0 / 1000, -50.0 / 1000, 350.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(220.0 / 1000, -50.0 / 1000, 450.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(220.0 / 1000, -50.0 / 1000, 550.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(220.0 / 1000, -50.0 / 1000, 650.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(220.0 / 1000, 270.0 / 1000, 350.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(220.0 / 1000, 270.0 / 1000, 450.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(220.0 / 1000, 270.0 / 1000, 550.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(220.0 / 1000, 270.0 / 1000, 650.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(220.0 / 1000, 550.0 / 1000, 350.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(220.0 / 1000, 550.0 / 1000, 450.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(220.0 / 1000, 550.0 / 1000, 550.0 / 1000, 0)
+  time.sleep(15)
+  tutorial.go_to_pose_goal(220.0 / 1000, 550.0 / 1000, 650.0 / 1000, 0)
+  time.sleep(15)
+
+def axis1_test(data):
+  tutorial = MoveGroupPythonIntefaceTutorial()
+  tutorial.go_to_joint_state(0.78535, -0.57385, -1.10568, 0.0, 1.677876, -1.5707)
+  time.sleep(10)
+  tutorial.go_to_joint_state(0.0, -0.57385, -1.10568, 0.0, 1.677876, -1.5707)
+  time.sleep(10)
+  tutorial.go_to_joint_state(-0.78535, -0.57385, -1.10568, 0.0, 1.677876, -1.5707)
+
+rospy.Subscriber('nsra/robot_grasp', bd_robot_coords, robot_grasp)
+rospy.Subscriber('robot_grasp_test', String, robot_grasp_test)
+rospy.Subscriber('joint_test', String, joint_test)
+rospy.Subscriber('joint_test_height', String, joint_test_height)
+
+def main():
+  try:
+    print("")
+    print("----------------------------------------------------------")
+    print("Welcome to the MoveIt MoveGroup Python Interface Tutorial")
+    print("----------------------------------------------------------")
+    print("Press Ctrl-D to exit at any time")
+    print("")
+    tutorial = MoveGroupPythonIntefaceTutorial()
+
+    tutorial.print_robot_info()
+
+  except rospy.ROSInterruptException:
+    return
+  except KeyboardInterrupt:
+    return
+
+  rospy.spin()
+
+if __name__ == '__main__':
+  main()

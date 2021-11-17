@@ -1,0 +1,355 @@
+#!/usr/bin/python3
+
+############################################################################# 
+#  BSD 3-Clause License
+# 
+#  Copyright (c) 2020, Noa Sendlhofer
+#  All rights reserved.
+# 
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions are met:
+# 
+#  1. Redistributions of source code must retain the above copyright notice, this
+#     list of conditions and the following disclaimer.
+# 
+#  2. Redistributions in binary form must reproduce the above copyright notice,
+#     this list of conditions and the following disclaimer in the documentation
+#     and/or other materials provided with the distribution.
+# 
+#  3. Neither the name of the copyright holder nor the names of its
+#     contributors may be used to endorse or promote products derived from
+#     this software without specific prior written permission.
+# 
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+#  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+#  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+#  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+#  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+#  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+#  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+#  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+#  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+############################################################################# 
+
+# Author: Noa Sendlhofer
+# Desc:   Part of the NSRA Robot Vision stack. Stereo camera test program using an NDI source.
+# 01.01.2021 - Stereo camera works! :)
+
+import cv2
+import nsra_pyndi.finder as finder
+import nsra_pyndi.receiver as receiver
+import nsra_pyndi.lib as lib
+import subprocess as sp
+import numpy as np
+import math
+import rospkg
+import threading
+
+#rospack
+rospack = rospkg.RosPack()
+pack_path = rospack.get_path('nsra_robot_vision')
+
+#config
+#Projection
+PR = None
+PL = None
+#Intrinsics
+KR = None
+KL = None
+#Distortion
+DR = None
+DL = None
+#Rotation
+RR = None
+RL = None
+
+try:
+    fs = cv2.FileStorage(pack_path + "/config/cam_stereo.yml", cv2.FILE_STORAGE_READ)
+    PR = fs.getNode("PR").mat()
+    PL = fs.getNode("PL").mat()
+    KR = fs.getNode("KR").mat()
+    KL = fs.getNode("KL").mat()
+    DR = fs.getNode("DR").mat()
+    DL = fs.getNode("DL").mat()
+    RR = fs.getNode("RR").mat()
+    RL = fs.getNode("RL").mat()
+except:
+    print("Error no config file found!")
+    quit()
+
+if PR.any() == None or PL.any() == None:
+    print("Error config file not valid!")
+    quit()
+
+try:
+    chessImg = cv2.imread(pack_path + "/images/left1.jpg")
+    imsize = (chessImg.shape[1], chessImg.shape[0])
+except:
+    print("Error no valid image found in the /image folder!")
+    quit()
+
+# initUndistortRectifyMap 
+Left_Stereo_Map= cv2.initUndistortRectifyMap(KL, DL, RL, PL,
+                                             imsize, cv2.CV_16SC2)
+Right_Stereo_Map= cv2.initUndistortRectifyMap(KR, DR, RR, PR,
+                                              imsize, cv2.CV_16SC2)
+
+#temporary! - NDI stream names
+rcam_name = "PC-NOA (TV0200110012)"
+lcam_name = "PC-NOA (TV0200110013)"
+
+#CBC detection
+criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+
+#World origin of cameras relative to the robot
+mtrx = np.array([[0.0, 0.0, 0.0],
+                 [0.0, 0.0, 0.0],
+                 [0.0, 0.0, 0.0]])
+
+rob_offset_vec = np.array([0.0, 0.0, 0.0])
+
+#NDI camera class
+class Camera():
+    def __init__(self, camera):
+        find = finder.create_ndi_finder()
+        NDIsources = find.get_sources()
+        self.cam_source = None
+        elapsed_time = 0.0
+        while len(NDIsources) < 2:
+            print(NDIsources)
+            print("Looking for cameras")
+            if elapsed_time >= 5.0:
+                print("Timeout - Not all cameras detected!")
+                quit()
+            NDIsources = find.get_sources()
+            elapsed_time += 1
+        for i in NDIsources:
+            if i.name == camera:
+                self.cam_source = i
+                break
+        if self.cam_source == None:
+            print("Detected cameras don't match with the input names")
+            quit()
+        else:
+            self.camera = receiver.create_receiver(self.cam_source)
+            print("Camera " + self.cam_source.name + " initialized")
+    
+    def get_frame(self):
+        return self.camera.read()
+
+    def get_name(self):
+        return self.cam_source.name
+
+#Create camera instances
+right_cam = Camera(rcam_name)
+left_cam = Camera(lcam_name)
+
+rtmp_url = 'rtmp://192.168.1.174:1935/app/live'
+#
+sizeStr = str(2160) + \
+    'x' + str(720)
+#
+print("------------------- STR: " + sizeStr)
+command = ['ffmpeg',
+           '-y',
+           '-f', 'rawvideo',
+           '-vcodec', 'rawvideo',
+           '-pix_fmt', 'bgr24',
+           '-s', sizeStr,
+           '-r', str(30),
+           '-i', '-',
+           '-c:v', 'libx264',
+           '-pix_fmt', 'yuv420p',
+           '-preset', 'ultrafast',
+           '-f', 'flv',
+           rtmp_url]
+
+process = sp.Popen(command, stdin=sp.PIPE)
+
+params = cv2.SimpleBlobDetector_Params()
+
+params.filterByArea = True
+params.minArea = 100
+params.maxArea = 10000
+
+params.filterByCircularity = True
+params.minCircularity = 0.1
+
+params.filterByConvexity = True
+params.minConvexity = 0
+params.maxConvexity = 1
+
+params.filterByInertia = True
+params.minInertiaRatio = 0.1
+
+detector = cv2.SimpleBlobDetector_create(params)
+
+kernal = np.ones((10,10), np.uint8)
+
+#cv2.namedWindow("left", cv2.WND_PROP_FULLSCREEN)
+#cv2.setWindowProperty("left",cv2.WND_PROP_FULLSCREEN,cv2.WINDOW_FULLSCREEN)
+
+#Calculate coordinate of point relative to the robot
+def detect(img):
+
+    pnts_img = np.array([[0.0,0.0],
+                         [0.0,0.0],
+
+    for i in range(2):
+        if ret == True:
+            #TODO: implement point tracking method!
+            origin_img[i,0] = ##
+            origin_img[i,1] = ##
+    
+    p_4d_obj = cv2.triangulatePoints(PR, PL, origin_img[0,:], origin_img[1,:])
+
+    obj_vec = np.array([p_4d[0] / p_4d[3],
+                        p_4d[1] / p_4d[3],
+                        p_4d[2] / p_4d[3]])
+    
+    mtrx_ret = np.linalg.solve(mtrx, obj_vec)
+
+    obj_trns_vec = np.array([np.linalg.norm(np.dot(mtrx[:,0], mtrx_ret[0])), np.linalg.norm(np.dot(mtrx[:,1], mtrx_ret[1])), np.linalg.norm(np.dot(mtrx[:,2], mtrx_ret[2]))])
+
+    if(mtrx_ret[0] < 0){
+        obj_trns_vec[0] = - obj_trns_vec[0]
+    }
+    if(mtrx_ret[1] < 0){
+        obj_trns_vec[1] = - obj_trns_vec[1]
+    }
+    if(mtrx_ret[2] < 0){
+        obj_trns_vec[2] = - obj_trns_vec[2]
+    }
+
+    obj_rob_vec = np.add(obj_trns_vec, rob_offset_vec)
+
+    print("Object vector to robot: ")
+    print(obj_rob_vec)
+    #TODO: implement moveit control
+
+#Calculate transformation matrix
+def callibrate(img):
+    global mtrx
+
+    pnts_img = np.array([[0.0,0.0],
+                         [0.0,0.0],
+                         [0.0,0.0],
+                         [0.0,0.0],
+                         [0.0,0.0],
+                         [0.0,0.0]])
+    for i in range(2):
+        gray = cv2.cvtColor(img[i], cv2.COLOR_BGR2GRAY)
+        ret, corners = cv2.findChessboardCorners(gray, (6,9), None)
+        if ret == True:
+            corners2 = cv2.cornerSubPix(gray, corners, (11,11), (-1,-1), criteria)
+            pnts_img[i,0] = corners2[0,0,0]
+            pnts_img[i,1] = corners2[0,0,1]
+            pnts_img[i+2,0] = corners2[5,0,0]
+            pnts_img[i+2,1] = corners2[5,0,1]
+            pnts_img[i+4,0] = corners2[48,0,0]
+            pnts_img[i+4,1] = corners2[48,0,1]
+            
+    
+    p_4d_org = cv2.triangulatePoints(PR, PL, pnts_img[0,:], pnts_img[1,:])
+    p_4d_x = cv2.triangulatePoints(PR, PL, pnts_img[2,:], pnts_img[3,:])
+    p_4d_y = cv2.triangulatePoints(PR, PL, pnts_img[4,:], pnts_img[5,:])
+
+    org_coord = np.array([p_4d_org[0] / p_4d_org[3],
+                          p_4d_org[1] / p_4d_org[3],
+                          p_4d_org[2] / p_4d_org[3]])
+    
+    x_coord = np.array([p_4d_x[0] / p_4d_x[3],
+                        p_4d_x[1] / p_4d_x[3],
+                        p_4d_x[2] / p_4d_x[3]])
+
+    y_coord = np.array([p_4d_y[0] / p_4d_y[3],
+                        p_4d_y[1] / p_4d_y[3],
+                        p_4d_y[2] / p_4d_y[3]])
+    
+    x_vec = np.subtract(x_coord, org_coord) #TODO: Make sure they point in the right way!
+    y_vec = np.subtract(y_coord, org_coord)
+    z_vec = np.cross(x_vec, y_vec)
+
+    mtrx = np.array([[x_vec[0], y_vec[0], z_vec[0]],
+                     [x_vec[1], y_vec[1], z_vec[1]],
+                     [x_vec[2], y_vec[2], z_vec[2]]])
+
+    print("---------------")
+    print("Callibration successful!")
+    print("Transformation matrix: ")
+    print(mtrx)
+    print("---------------")
+
+while(True):
+    #Get next image from cameras
+    img_left = left_cam.get_frame()
+    img_right = right_cam.get_frame()
+
+    #Undistort rectify images
+    img_left = cv2.remap(img_left,Left_Stereo_Map[0],Left_Stereo_Map[1], cv2.INTER_LANCZOS4, cv2.BORDER_CONSTANT, 0)
+    img_right = cv2.remap(img_right,Right_Stereo_Map[0],Right_Stereo_Map[1], cv2.INTER_LANCZOS4, cv2.BORDER_CONSTANT, 0)
+
+    #Detect bottle caps TODO: If the code runs too slow put all of this in the detect function...
+    blur_frame_left = cv2.GaussianBlur(img_left, (5,5), 1)
+    blur_frame_right = cv2.GaussianBlur(img_right, (5,5), 1)
+
+    hsv_frame_left = cv2.cvtColor(blur_frame_left, cv2.COLOR_BGR2HSV)
+    hsv_frame_right = cv2.cvtColor(blur_frame_right, cv2.COLOR_BGR2HSV)
+
+    low_red = np.array([rl,gl,bl])
+    high_red = np.array([rh, gh, bh])
+    red_mask_left = cv2.inRange(hsv_frame_left, low_red, high_red)
+    red_mask_right = cv2.inRange(hsv_frame_right, low_red, high_red)
+
+    red_mask_left = cv2.bitwise_not(red_mask_left)
+    red_mask_right = cv2.bitwise_not(red_mask_right)
+
+    red_mask_left = cv2.dilate(red_mask_left, kernal)
+    red_mask_right = cv2.dilate(red_mask_right, kernal)
+
+    keypoints_left = detector.detect(red_mask_left)
+    keypoints_right = detector.detect(red_mask_right)
+
+    imgKeyPoints_left = cv2.drawKeypoints(red_mask_left, keypoints_left, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    imgKeyPoints_right = cv2.drawKeypoints(red_mask_right, keypoints_right, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+    blur_frame_points_left = cv2.drawKeypoints(blur_frame_left, keypoints_left, np.array([]), (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    blur_frame_points_right = cv2.drawKeypoints(blur_frame_right, keypoints_right, np.array([]), (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+    #Draw world origin
+    frame_r = cv2.circle(img_right, (int(round(origin_img[0,0])), int(round(origin_img[0,1]))), radius=5, color=(0, 0, 255), thickness=-1)
+    frame_l = cv2.circle(img_left, (int(round(origin_img[1,0])), int(round(origin_img[1,1]))), radius=5, color=(0, 0, 255), thickness=-1)
+
+    #Resize for imshow
+    frame_l = cv2.resize(frame_l, (1080, 720))
+    frame_r = cv2.resize(frame_r, (1080, 720))
+
+    #Draw horizontal lines
+    #for line in range(0, int(frame_r.shape[0]/20)):
+    #    frame_l[line*20,:] = (0,255,0,0)
+    #    frame_r[line*20,:] = (0,255,0,0)
+
+    #Concatenate left and right image
+    output_img = np.concatenate((frame_l, frame_r), axis=1)
+
+    out = cv2.cvtColor(output_img, cv2.COLOR_RGB2BGR)
+
+    #Show concentated frame
+    #cv2.imshow('left', out)
+    #cv2.imshow('left', frame_l)
+    #out = cv2.cvtColor(frame_l, cv2.COLOR_RGB2BGR)
+    process.stdin.write(out.tobytes())
+
+    #Wait for user input
+    key = cv2.waitKey(50)
+    if key == 27:
+        print("User Quit")
+        break
+    elif key == 13:
+        print("Callibrate camera origin")
+        callibrate([img_right, img_left])
+    elif key == 32:
+        detect([img_right, img_left])
+
+cv2.destroyAllWindows()

@@ -1,0 +1,261 @@
+<?xml version="1.0" ?>
+<robot name="Robot">
+<link name="base_link">
+  <inertial>
+    <origin rpy="0 0 0" xyz="0.220772 -0.475604 0.001301"/>
+    <mass value="205.712105"/>
+    <inertia ixx="7.733138" ixy="0.003556" ixz="0.168204" iyy="13.401536" iyz="-0.186948" izz="6.805789"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/base_link_m-binary.stl"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/base_link_m-binary.stl"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component1_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="-0.03947300000000001 0.08378200000000002 -0.037645"/>
+    <mass value="20.922358"/>
+    <inertia ixx="0.157797" ixy="0.006062" ixz="-0.315131" iyy="0.205525" iyz="0.370636" izz="0.179141"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="-0.2 0.366257 -0.0"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/Component1_1_m-binary.stl"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="-0.2 0.366257 -0.0"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/Component1_1_m-binary.stl"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component2_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="0.0 0.226486 0.054308999999999996"/>
+    <mass value="13.1521"/>
+    <inertia ixx="0.673202" ixy="-0.0" ixz="-0.235485" iyy="0.032171" iyz="0.181962" izz="0.660051"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="-0.2 0.215257 0.1276"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/Component2_1_m-binary.stl"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="-0.2 0.215257 0.1276"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/Component2_1_m-binary.stl"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component3_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="-0.00927900000000001 0.04514500000000002 -0.043092"/>
+    <mass value="11.720524"/>
+    <inertia ixx="0.049256" ixy="0.006477" ixz="-0.002159" iyy="0.032758" iyz="0.00359" izz="0.066201"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="-0.2 -0.244742 -0.0465"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/Component3_1_m-binary.stl"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="-0.2 -0.244742 -0.0465"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/Component3_1_m-binary.stl"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component4_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="0.33943 -8.999999999981245e-06 -0.015519"/>
+    <mass value="3.348314"/>
+    <inertia ixx="0.003841" ixy="2e-06" ixz="-0.010584" iyy="0.066726" iyz="0.015082" izz="0.063783"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="-0.215 -0.350742 -0.0"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/Component4_1_m-binary.stl"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="-0.215 -0.350742 -0.0"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/Component4_1_m-binary.stl"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component5_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="0.00292199999999998 1.2999999999985246e-05 0.011389999999999997"/>
+    <mass value="2.858845"/>
+    <inertia ixx="0.004147" ixy="1e-06" ixz="0.043071" iyy="0.006605" iyz="-0.042298" izz="0.003957"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="-0.641 -0.350742 -0.04"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/Component5_1_m-binary.stl"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="-0.641 -0.350742 -0.04"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/Component5_1_m-binary.stl"/>
+    </geometry>
+  </collision>
+</link>
+<link name="Component6_1">
+  <inertial>
+    <origin rpy="0 0 0" xyz="0.0072590000000000154 0.0 0.0"/>
+    <mass value="0.340558"/>
+    <inertia ixx="0.000152" ixy="0.0" ixz="0.0" iyy="9e-05" iyz="0.0" izz="9e-05"/>
+  </inertial>
+  <visual>
+    <origin rpy="0 0 0" xyz="-0.693 -0.350742 0.0"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/Component6_1_m-binary.stl"/>
+    </geometry>
+    <material name="silver">
+      <color rgba="1 0 0 1"/>
+    </material>
+  </visual>
+  <collision>
+    <origin rpy="0 0 0" xyz="-0.693 -0.350742 0.0"/>
+    <geometry>
+      <mesh filename="package://fusion2urdf/Robot/bin_stl/Component6_1_m-binary.stl"/>
+    </geometry>
+  </collision>
+</link>
+<joint name="Rev1" type="revolute">
+  <origin rpy="0 0 0" xyz="0.2 -0.366257 0.0"/>
+  <parent link="base_link"/>
+  <child link="Component1_1"/>
+  <axis xyz="0.0 0.01 0.0"/>
+  <limit effort="1" velocity="1.0" lower="-2.0944" upper="2.0944" />
+</joint>
+<transmission name="Rev1_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Rev1">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Rev1_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<joint name="Rev2" type="revolute">
+  <origin rpy="0 0 0" xyz="0.0 0.151 -0.1276"/>
+  <parent link="Component1_1"/>
+  <child link="Component2_1"/>
+  <axis xyz="0.0 -0.0 0.01"/>
+  <limit effort="1" velocity="1.0" lower="-1.5708" upper="1.5708" />
+</joint>
+<transmission name="Rev2_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Rev2">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Rev2_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<joint name="Rev3" type="revolute">
+  <origin rpy="0 0 0" xyz="0.0 0.459999 0.1741"/>
+  <parent link="Component2_1"/>
+  <child link="Component3_1"/>
+  <axis xyz="0.0 -0.0 0.01"/>
+  <limit effort="1" velocity="1.0" lower="-1.5708" upper="1.5708" />
+</joint>
+<transmission name="Rev3_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Rev3">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Rev3_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<joint name="Rev4" type="revolute">
+  <origin rpy="0 0 0" xyz="0.015 0.106 -0.0465"/>
+  <parent link="Component3_1"/>
+  <child link="Component4_1"/>
+  <axis xyz="0.01 0.0 -0.0"/>
+  <limit effort="1" velocity="1.0" lower="-3.1415" upper="3.1415" />
+</joint>
+<transmission name="Rev4_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Rev4">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Rev4_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<joint name="Rev5" type="revolute">
+  <origin rpy="0 0 0" xyz="0.426 0.0 0.04"/>
+  <parent link="Component4_1"/>
+  <child link="Component5_1"/>
+  <axis xyz="0.0 -0.0 0.01"/>
+  <limit effort="1" velocity="1.0" lower="-1.7453" upper="1.7453" />
+</joint>
+<transmission name="Rev5_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Rev5">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Rev5_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<joint name="Rev6" type="continuous">
+  <origin rpy="0 0 0" xyz="0.052 0.0 -0.04"/>
+  <parent link="Component5_1"/>
+  <child link="Component6_1"/>
+  <axis xyz="0.01 -0.0 -0.0"/>
+</joint>
+<transmission name="Rev6_tran">
+  <type>transmission_interface/SimpleTransmission</type>
+  <joint name="Rev6">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+  </joint>
+  <actuator name="Rev6_actr">
+    <hardwareInterface>PositionJointInterface</hardwareInterface>
+    <mechanicalReduction>1</mechanicalReduction>
+  </actuator>
+</transmission>
+<gazebo>
+  <plugin filename="libgazebo_ros_control.so" name="control"/>
+</gazebo>
+</robot>

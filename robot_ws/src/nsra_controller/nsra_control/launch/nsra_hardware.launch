@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<launch>
+
+  <!-- GDB functionality -->
+  <arg name="debug" default="false" />
+  <arg unless="$(arg debug)" name="launch_prefix" value="" />
+  <arg     if="$(arg debug)" name="launch_prefix" value="gdb --ex run --args" />
+
+  <!-- Load example URDF -->
+  <param name="robot_description" command="xacro --inorder $(find nsra_urdf)/urdf/nsra.xacro" />
+
+  <group ns="nsra">
+
+    <!-- Load hardware interface -->
+    <node name="nsra_hardware_interface" pkg="nsra_controller" type="nsra_hw_main"
+          output="screen" launch-prefix="$(arg launch_prefix)"/>
+
+    <!-- Load controller settings -->
+    <rosparam file="$(find nsra_controller)/config/nsra_controllers.yaml" command="load"/>
+
+    <!-- Load controller manager -->
+    <node name="ros_control_controller_manager" pkg="controller_manager" type="controller_manager" respawn="false"
+	  output="screen" args="spawn joint_state_controller position_trajectory_controller gripper_trajectory_controller" />
+
+    <!-- Convert joint states to /tf tranforms -->
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"/>
+
+  </group>
+
+</launch>

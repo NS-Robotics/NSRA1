@@ -1,0 +1,5 @@
+#request
+int16 axis
+---
+#response
+float32 position

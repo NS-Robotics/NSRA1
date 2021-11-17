@@ -1,0 +1,6 @@
+#request
+int16 axis
+int16 requested_state
+---
+#response
+bool result

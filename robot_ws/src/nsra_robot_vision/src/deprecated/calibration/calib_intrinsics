@@ -1,0 +1,246 @@
+#!/usr/bin/python
+
+import cv2
+import time
+import multiprocessing as mp
+import numpy as np
+import rospkg
+import yaml
+import sys
+import nsra_gxipy as gx
+from PIL import Image
+from threading import Thread
+import subprocess as sp
+
+rospack = rospkg.RosPack()
+
+class camera():
+
+    def __init__(self,cam_num):        
+        #load pipe for data transmittion to the process
+        self.parent_conn, child_conn = mp.Pipe()
+        #load process
+        self.p = mp.Process(target=self.update, args=(child_conn,cam_num))        
+        #start process
+        self.p.daemon = True
+        self.p.start()
+
+    def end(self):
+        #send closure request to process
+
+        self.parent_conn.send(2)
+
+
+    def update(self,conn,cam_num):
+        #load cam into seperate process
+
+        device_manager = gx.DeviceManager()
+
+        devices = {
+            0: "TV0200110013",
+            1: "TV0200110012"
+        }
+
+        print("Cam %s Loading..." % devices.get(cam_num))
+
+        dev_num, dev_info_list = device_manager.update_device_list()
+
+        if dev_num == 0:
+            print("Number of enumerated devices is 0")
+            return
+
+        if cam_num != 0 and cam_num != 1:
+            print("Invalid cam number!")
+            return
+
+        cam = device_manager.open_device_by_sn(devices.get(cam_num))
+
+        if cam.PixelColorFilter.is_implemented() == False:
+            print("This sample does not support mono camera.")
+            cam.close_device()
+            return
+
+        cam.TriggerMode.set(gx.GxSwitchEntry.OFF)
+
+        cam.ExposureTime.set(10000.0)
+
+        cam.Gain.set(10.0)
+
+        cam.BalanceWhiteAuto.set(1)
+
+        cam.data_stream[0].set_acquisition_buffer_number(1)
+        cam.stream_on()
+
+        print("Cam %s Loaded..." % devices.get(cam_num))
+
+        run = True
+
+        while run:
+
+            #recieve input data
+            rec_dat = conn.recv()
+
+            if rec_dat == 1:
+                #if frame requested
+                raw_image = cam.data_stream[0].get_image()
+
+                if raw_image is None:
+                    print("Getting image failed.")
+                    continue
+
+                if raw_image.get_status() == gx.GxFrameStatusList.INCOMPLETE:
+                    pass
+
+                rgb_image = raw_image.convert("RGB")
+                if rgb_image is None:
+                    continue
+
+                numpy_image = rgb_image.get_numpy_array()
+                if numpy_image is None:
+                    continue
+
+                frame = cv2.cvtColor(np.asarray(numpy_image),cv2.COLOR_BGR2RGB)
+
+                conn.send(frame)
+
+            elif rec_dat == 2:
+                #if close requested
+                cam.stream_off()
+                cam.close_device()
+                run = False
+
+        print("Camera Connection Closed")        
+        conn.close()
+
+    def get_frame(self,resize=None):
+        ###used to grab frames from the cam connection process
+
+        ##[resize] param : % of size reduction or increase i.e 0.65 for 35% reduction  or 1.5 for a 50% increase
+
+        #send request
+        self.parent_conn.send(1)
+        frame = self.parent_conn.recv()
+        #print(frame)
+        #reset request 
+        self.parent_conn.send(0)
+
+        #resize if needed
+        if resize == None:            
+            return frame
+        else:
+            return self.rescale_frame(frame,resize)
+
+    def rescale_frame(self,frame, percent=65):
+
+        return cv2.resize(frame,None,fx=percent,fy=percent) 
+
+cam_left = camera(0)
+cam_right = camera(1)
+
+criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+
+objp = np.zeros((6*9,3), np.float32)
+objp[:,:2] = np.mgrid[0:2760:345,0:1275:345].T.reshape(-1,2)
+
+#print(objp)
+
+objpoints_left = [] 
+objpoints_right = [] 
+
+imgpoints_left = [] 
+imgpoints_right = [] 
+
+img_nb = int(sys.argv[1])
+
+pack_path = rospack.get_path('nsra_robot_vision')
+
+def findCBC_LEFT(img):
+    calib_name = pack_path + '/images/left' + str(img_nb + 1) + '.jpg'
+    stereo_name = pack_path + '/stereo/left' + str(img_nb + 1) + '.jpg'
+    cv2.imwrite(stereo_name, img)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ret, corners = cv2.findChessboardCorners(gray, (6,9), None)
+    if ret == True:
+        objpoints_left.append(objp)
+        corners2 = cv2.cornerSubPix(gray,corners,(11,11),(-1,-1),criteria)
+        imgpoints_left.append(corners2)
+        cv2.imwrite(calib_name, img)
+        print("Success on left image!")
+    else:
+        print("No corners detected in the left image!")     
+
+def findCBC_RIGHT(img):
+    calib_name = pack_path + '/images/right' + str(img_nb + 1) + '.jpg'
+    stereo_name = pack_path + '/stereo/right' + str(img_nb + 1) + '.jpg'
+    cv2.imwrite(stereo_name, img)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ret, corners = cv2.findChessboardCorners(gray, (6,9), None)
+    if ret == True:
+        objpoints_right.append(objp)
+        corners2 = cv2.cornerSubPix(gray,corners,(11,11),(-1,-1),criteria)
+        imgpoints_right.append(corners2)
+        cv2.imwrite(calib_name, img)
+        print("Success on right image!")
+    else:
+        print("No corners detected in the right image!")
+
+while(1):
+    img_left = cam_left.get_frame(1)
+    img_right = cam_right.get_frame(1)
+
+    frame_l = cv2.resize(img_left, (1920, 1080))
+    frame_r = cv2.resize(img_right, (1920, 1080)) 
+
+    output_img = np.concatenate((frame_r, frame_l), axis=1)
+
+    cv2.imshow('left and right camera', output_img)
+
+    key = cv2.waitKey(1)
+    if key == 27:
+        break
+    elif (key == 13) and (img_nb > 0):
+        print("Remaining Images: " + str(img_nb))
+        img_nb -= 1
+
+        t1 = Thread(target=findCBC_LEFT, args=(img_left,))
+        t2 = Thread(target=findCBC_RIGHT, args=(img_right,))
+        t1.start()
+        t2.start()
+
+    elif(img_nb == 0):
+        break
+    #    ret1, mtx1, dist1, rvecs1, tvecs1 = cv2.calibrateCamera(objpoints_left, imgpoints_left, (1920,1080), None, None)
+    #    print("RMS1: " + str(ret1))
+    #    #data1 = {'K': np.asarray(mtx1).tolist(),
+    #    #        'D': np.asarray(dist1).tolist()}
+    #
+    #    #with open(pack_path + "/config/intrinsics_left.yaml", "w") as f1:
+    #    #    yaml.dump(data1, f1)
+
+    #    fsl = cv2.FileStorage(pack_path + "/config/intrinsics_left.yml", flags=1)
+    #    fsl.write(name='K', val=mtx1)
+    #    fsl.write(name='D', val=dist1)
+    #    fsl.release()
+
+    #    ret2, mtx2, dist2, rvecs2, tvecs2 = cv2.calibrateCamera(objpoints_right, imgpoints_right, (1920,1080), None, None)
+    #    print("RMS2: " + str(ret2)) 
+        #data2 = {'K': np.asarray(mtx2).tolist(),
+        #        'D': np.asarray(dist2).tolist()}
+
+        #with open(pack_path + "/config/intrinsics_right.yaml", "w") as f2:
+        #    yaml.dump(data2, f2)
+
+    #    fsr = cv2.FileStorage(pack_path + "/config/intrinsics_right.yml", flags=1)
+    #    fsr.write(name='K', val=mtx2)
+    #    fsr.write(name='D', val=dist2)
+    #    fsr.release()
+
+    #    cam_left.end()
+    #    cam_right.end()
+
+    #    break
+
+cam_left.end()
+cam_right.end()
+
+cv2.destroyAllWindows()     

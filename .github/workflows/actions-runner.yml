@@ -1,0 +1,35 @@
+# This is a basic workflow to help you get started with Actions
+
+name: CI
+
+# Controls when the action will run. Triggers the workflow on push or pull request
+# events but only for the master branch
+on:
+  push:
+    branches: [ deploy ]
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+
+  deploy:
+    
+    runs-on: self-hosted
+
+    steps:
+      
+      - name: Remove old repository
+        run: |
+          ssh jetson@192.168.1.192 'if [ -d ~/deploy ]; then sudo rm -Rf ~/deploy; fi'
+    
+      - name: Git clone
+        run: |
+          ssh jetson@192.168.1.192 git clone https://Noothless:gtFxGEzpXAi3@github.com/Noothless/NS-RobotArm.git
+        
+      - name: Setup new repository
+        run: |
+          ssh jetson@192.168.1.192 'cp -r ~/NS-RobotArm/deploy ~/ && sudo rm -Rf ~/NS-RobotArm'
+#      - name: Upload to Arduino
+#        run: |
+#          ssh jetson@192.168.1.192 'cd ~/deploy/arduino/CANMaster && amake -u uno CANMaster.ino /dev/ttyUSB*'
+
+#ssh noa-jetson@192.168.1.192 

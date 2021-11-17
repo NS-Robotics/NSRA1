@@ -1,0 +1,427 @@
+#!/usr/bin/python3
+
+############################################################################# 
+#  BSD 3-Clause License
+# 
+#  Copyright (c) 2020, Noa Sendlhofer
+#  All rights reserved.
+# 
+#  Redistribution and use in source and binary forms, with or without
+#  modification, are permitted provided that the following conditions are met:
+# 
+#  1. Redistributions of source code must retain the above copyright notice, this
+#     list of conditions and the following disclaimer.
+# 
+#  2. Redistributions in binary form must reproduce the above copyright notice,
+#     this list of conditions and the following disclaimer in the documentation
+#     and/or other materials provided with the distribution.
+# 
+#  3. Neither the name of the copyright holder nor the names of its
+#     contributors may be used to endorse or promote products derived from
+#     this software without specific prior written permission.
+# 
+#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+#  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+#  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+#  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+#  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+#  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+#  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+#  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+#  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+############################################################################# 
+
+# Author: Noa Sendlhofer
+# Desc:   Part of the NSRA Robot Vision stack. Stereo camera color configurator.
+
+import cv2
+import multiprocessing as mp
+import subprocess as sp
+import yaml
+import sys
+import nsra_gxipy as gx
+import numpy as np
+import math
+import rospkg
+import threading
+import rospy
+import time
+from termcolor import colored
+from std_msgs.msg import String
+from std_msgs.msg import Float32
+from configparser import ConfigParser
+from sensor_msgs.msg import Image
+from cv_bridge import CvBridge
+
+#config
+config_object = ConfigParser()
+
+#rospack
+rospack = rospkg.RosPack()
+pack_path = rospack.get_path('nsra_robot_vision')
+
+#color filter parameter 105/120/100/120/220/255
+hl = 105
+sl = 120
+vl = 100
+hh = 120
+sh = 220
+vh = 255
+
+cam_config = [15.0,100000.0]
+
+#load config file
+try:
+    config_object.read(pack_path + "/config/stereo_bd_config.yml")
+
+    cam_config[0] = config_object.getfloat("CAMERA", "cam_gain")
+    cam_config[1] = config_object.getfloat("CAMERA", "cam_exposure")
+
+    hl = config_object.getint("PARAMS", "hl")
+    sl = config_object.getint("PARAMS", "sl")
+    vl = config_object.getint("PARAMS", "vl")
+    hh = config_object.getint("PARAMS", "hh")
+    sh = config_object.getint("PARAMS", "sh")
+    vh = config_object.getint("PARAMS", "vh")
+
+    print("---------------")
+    print("Parameters loaded!")
+    print("Camera config:")
+    print("Gain: %f Exposure: %f" % (cam_config[0], cam_config[1]))
+    print("HSV Color filter:")
+    print("Upper limit: %d / %d / %d Lower limit: %d / %d / %d" % (hh, sh, vh, hl, sl, vl))
+    print("---------------")
+
+except:
+    print(colored("No valid config file found!", 'red'))
+
+if rospy.has_param('camera_config') and rospy.has_param('color_filter'):
+    cam_config = rospy.get_param('camera_config')
+    color_filter = rospy.get_param('color_filter')
+
+    config_object["PARAMS"] = {
+            "hh": str(color_filter[0]),
+            "sh": str(color_filter[1]),
+            "vh": str(color_filter[2]),
+            "hl": str(color_filter[3]),
+            "sl": str(color_filter[4]),
+            "vl": str(color_filter[5]),
+    }
+
+    with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+        config_object.write(conf)
+    
+    config_object["CAMERA"] = {
+            "cam_gain": str(cam_config[0]),
+            "cam_exposure": str(cam_config[1]),
+    }
+
+    with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+        config_object.write(conf)
+
+    print("---------------")
+    print("ROS Paramaters loaded!")
+    print("Camera config:")
+    print("Gain: %f Exposure: %f" % (cam_config[0], cam_config[1]))
+    print("HSV Color filter:")
+    print("Upper limit: %d / %d / %d Lower limit: %d / %d / %d" % (color_filter[0], color_filter[1], color_filter[2], color_filter[3], color_filter[4], color_filter[5]))
+    print("---------------")
+
+class camera():
+
+    def __init__(self,cam_num):        
+        #load pipe for data transmittion to the process
+        self.parent_conn, child_conn = mp.Pipe()
+        #load process
+        self.p = mp.Process(target=self.update, args=(child_conn,cam_num))        
+        #start process
+        self.cam = None
+
+        self.p.daemon = True
+        self.p.start()
+
+    def end(self):
+        #send closure request to process
+
+        self.parent_conn.send(2)
+
+
+    def update(self,conn,cam_num):
+        #load cam into seperate process
+
+        device_manager = gx.DeviceManager()
+
+        devices = {
+            0: "TV0200110013",
+            1: "TV0200110012"
+        }
+
+        print("Cam %s Loading..." % devices.get(cam_num))
+
+        dev_num, dev_info_list = device_manager.update_device_list()
+
+        if dev_num == 0:
+            print(colored("Number of enumerated devices is 0", 'red'))
+            return
+
+        if cam_num != 0 and cam_num != 1:
+            print(colored("Invalid cam number!", 'red'))
+            return
+
+        self.cam = device_manager.open_device_by_sn(devices.get(cam_num))
+
+        if self.cam.PixelColorFilter.is_implemented() == False:
+            print(colored("This program does not support mono camera.", 'red'))
+            self.cam.close_device()
+            return
+
+        self.cam.TriggerMode.set(gx.GxSwitchEntry.OFF)
+
+        self.cam.ExposureTime.set(cam_config[1])
+
+        self.cam.Gain.set(cam_config[0])
+
+        self.cam.BalanceWhiteAuto.set(1)
+
+        self.cam.data_stream[0].set_acquisition_buffer_number(1)
+        self.cam.stream_on()
+
+        print(colored("Cam %s Loaded..." % devices.get(cam_num), 'green'))
+
+        run = True
+
+        while run:
+
+            #recieve input data
+            rec_dat = conn.recv()
+
+            if rec_dat == 1:
+                #if frame requested
+                raw_image = self.cam.data_stream[0].get_image()
+
+                if raw_image is None:
+                    print(colored("Getting image failed.", 'red'))
+                    continue
+
+                if raw_image.get_status() == gx.GxFrameStatusList.INCOMPLETE:
+                    pass
+
+                rgb_image = raw_image.convert("RGB")
+                if rgb_image is None:
+                    continue
+
+                numpy_image = rgb_image.get_numpy_array()
+                if numpy_image is None:
+                    continue
+
+                frame = cv2.cvtColor(np.asarray(numpy_image),cv2.COLOR_BGR2RGB)
+
+                conn.send(frame)
+
+            elif rec_dat == 2:
+                #if close requested
+                self.cam.stream_off()
+                self.cam.close_device()
+                run = False
+            
+            elif rec_dat == 3:
+                gain = conn.recv()
+                exp = conn.recv()
+                try:
+                    self.cam.ExposureTime.set(exp)
+                    self.cam.Gain.set(gain)
+                except:
+                    print(colored("Error changing parameters!", 'red'))
+
+        print("Camera %s Connection Closed" % devices.get(cam_num))        
+        conn.close()
+
+    def get_frame(self,resize=None):
+        ###used to grab frames from the cam connection process
+
+        ##[resize] param : % of size reduction or increase i.e 0.65 for 35% reduction  or 1.5 for a 50% increase
+
+        #send request
+        self.parent_conn.send(1)
+        frame = self.parent_conn.recv()
+        #print(frame)
+        #reset request 
+        self.parent_conn.send(0)
+
+        #resize if needed
+        if resize == None:            
+            return frame
+        else:
+            return self.rescale_frame(frame,resize)
+    
+    def change_params(self):
+
+        self.parent_conn.send(3)
+        self.parent_conn.send(cam_config[0])
+        self.parent_conn.send(cam_config[1])
+        self.parent_conn.send(0)
+        
+    def rescale_frame(self,frame, percent=65):
+
+        return cv2.resize(frame,None,fx=percent,fy=percent) 
+
+img_left = None
+img_right = None
+
+rec_flag_l = True
+rec_flag_r = True
+
+br = CvBridge()
+
+def change_img_left(msg):
+    global img_left
+    global rec_flag_l
+    rec_flag_l = False
+    img_left = br.imgmsg_to_cv2(msg)
+
+def change_img_right(msg):
+    global img_right
+    global rec_flag_r
+    rec_flag_r = False
+    img_right = br.imgmsg_to_cv2(msg)
+
+rospy.init_node('nsra_camera_configurator')
+rospy.Subscriber("nsra/stereo_camera_left", Image, change_img_left)
+rospy.Subscriber("nsra/stereo_camera_right", Image, change_img_right)
+update_call = rospy.Publisher('nsra/configurator_update', String, queue_size=1)
+
+#cam_left = camera(0)
+#cam_right = camera(1)
+
+while(rec_flag_l or rec_flag_r):
+    time.sleep(0.1)
+
+
+def camGainCallback(value):
+    cam_config[0] = value
+    
+
+def camExposureCallback(value):
+    cam_config[1] = value
+
+params = cv2.SimpleBlobDetector_Params()
+
+params.filterByArea = True
+params.minArea = 100
+params.maxArea = 10000
+
+params.filterByCircularity = True
+params.minCircularity = 0.1
+
+params.filterByConvexity = True
+params.minConvexity = 0
+params.maxConvexity = 1
+
+params.filterByInertia = True
+params.minInertiaRatio = 0.1
+
+detector = cv2.SimpleBlobDetector_create(params)
+
+kernal = np.ones((2,2), np.uint8)
+
+windowName = "color_configurator"
+cv2.namedWindow(windowName)
+
+def nothing(value):
+    pass
+
+cv2.createTrackbar('Gain', windowName, 0, 25, camGainCallback)
+cv2.createTrackbar('Exposure', windowName, 0, 120000, camExposureCallback)
+cv2.createTrackbar('Hue High', windowName, 0, 255, nothing)
+cv2.createTrackbar('Saturation High', windowName, 0, 255, nothing)
+cv2.createTrackbar('Value High', windowName, 0, 255, nothing)
+cv2.createTrackbar('Hue Low', windowName, 0, 255, nothing)
+cv2.createTrackbar('Saturation Low', windowName, 0, 255, nothing)
+cv2.createTrackbar('Value Low', windowName, 0, 255, nothing)
+
+cv2.setTrackbarPos("Gain", windowName, int(cam_config[0]))
+cv2.setTrackbarPos("Exposure", windowName, int(cam_config[1]))
+cv2.setTrackbarPos("Hue High", windowName, hh)
+cv2.setTrackbarPos("Saturation High", windowName, sh)
+cv2.setTrackbarPos("Value High", windowName, vh)
+cv2.setTrackbarPos("Hue Low", windowName, hl)
+cv2.setTrackbarPos("Saturation Low", windowName, sl)
+cv2.setTrackbarPos("Value Low", windowName, vl)
+
+while(True):
+    #Get next image from cameras
+    #img_left = cam_left.get_frame(1)
+    #img_right = cam_right.get_frame(1)
+
+    #img_left_sized = cv2.resize(img_left, (1080, 720))
+    #img_right_sized = cv2.resize(img_right, (1080, 720))
+
+    hsv_frame_left = cv2.cvtColor(img_left, cv2.COLOR_RGB2HSV)
+    hsv_frame_right = cv2.cvtColor(img_right, cv2.COLOR_RGB2HSV)
+
+    low_red = np.array([hl,sl,vl])
+    high_red = np.array([hh, sh, vh])
+    red_mask_left = cv2.inRange(hsv_frame_left, low_red, high_red)
+    red_mask_right = cv2.inRange(hsv_frame_right, low_red, high_red)
+
+    red_mask_left = cv2.bitwise_not(red_mask_left)
+    red_mask_right = cv2.bitwise_not(red_mask_right)
+
+    red_mask_left = cv2.dilate(red_mask_left, kernal)
+    red_mask_right = cv2.dilate(red_mask_right, kernal)
+
+    keypoints_left = detector.detect(red_mask_left)
+    keypoints_right = detector.detect(red_mask_right)
+
+    imgKeyPoints_left = cv2.drawKeypoints(red_mask_left, keypoints_left, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    imgKeyPoints_right = cv2.drawKeypoints(red_mask_right, keypoints_right, np.array([]), (0,0,255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+    blur_frame_points_left = cv2.drawKeypoints(img_left, keypoints_left, np.array([]), (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    blur_frame_points_right = cv2.drawKeypoints(img_right, keypoints_right, np.array([]), (0,255,0), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+    #Concatenate left and right image
+    blur_out_img = np.concatenate((blur_frame_points_left, blur_frame_points_right), axis=1)
+    mask_out_img = np.concatenate((imgKeyPoints_left, imgKeyPoints_right), axis=1)
+    output_img = np.concatenate((blur_out_img, mask_out_img), axis=0)
+
+    hh = cv2.getTrackbarPos("Hue High", windowName)
+    sh = cv2.getTrackbarPos("Saturation High", windowName)
+    vh = cv2.getTrackbarPos("Value High", windowName)
+    hl = cv2.getTrackbarPos("Hue Low", windowName)
+    sl = cv2.getTrackbarPos("Saturation Low", windowName)
+    vl = cv2.getTrackbarPos("Value Low", windowName)
+    cv2.imshow(windowName, output_img)
+    
+    key = cv2.waitKey(1)
+    if key == 27:
+        break
+    elif key == 13:
+        #cam_left.change_params()
+        #cam_right.change_params()
+        print("Changes saved!")
+
+        rospy.set_param('color_filter', [hh, sh, vh, hl, sl, vl])
+        rospy.set_param('camera_config', cam_config)
+
+        update_call.publish("update")
+
+        config_object["CAMERA"] = {
+            "cam_gain": str(cam_config[0]),
+            "cam_exposure": str(cam_config[1]),  
+        }
+
+        with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+            config_object.write(conf)
+        
+        config_object["PARAMS"] = {
+            "hh": hh,
+            "sh": sh,
+            "vh": vh,
+            "hl": hl,
+            "sl": sl,
+            "vl": vl,
+        }
+
+        with open(pack_path + "/config/stereo_bd_config.yml", 'w') as conf:
+            config_object.write(conf)

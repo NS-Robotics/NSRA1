@@ -1,0 +1,50 @@
+#!/usr/bin/python
+import cv2
+import numpy as np
+import rospy
+from std_msgs.msg import String
+from nsra_odrive_interface.srv import *
+import sys
+
+rospy.init_node('corner_detect_left')
+
+corner_x = 0.0
+corner_y = 0.0
+
+def left_camera(req):
+    return coordsResponse(corner_x, corner_y)
+    
+s = rospy.Service('left_camera', coords, left_camera)
+
+cap = cv2.VideoCapture(str(sys.argv[1]))
+
+while True:
+    _, frame = cap.read()
+    blur_frame = cv2.GaussianBlur(frame, (5,5), 1)
+    hsv_frame = cv2.cvtColor(blur_frame, cv2.COLOR_BGR2HSV)
+
+    retval, corners = cv2.findChessboardCorners(blur_frame, (6,9), flags=cv2.CALIB_CB_FAST_CHECK)
+
+    if retval:
+        r,g,b=cv2.split(blur_frame)
+        criteria = (cv2.TermCriteria_EPS + cv2.TermCriteria_MAX_ITER, 30, 0.1)
+        cv2.cornerSubPix(r, corners, (11,11), (-1,-1), criteria)
+
+    cv2.drawChessboardCorners(blur_frame, (6,9), corners, retval)
+
+    #print(corners)
+
+    try:
+        corner_x = corners[0,0,0]
+        corner_y = corners[0,0,1]
+    except:
+        print("No corners found yet!")
+
+    cv2.imshow(str(sys.argv[1]), blur_frame)
+
+    key = cv2.waitKey(1)
+    if key == 27:
+        break
+    elif key == 10:
+        print(corners[0,0,0])
+        print(corners[0,0,1])

@@ -1,0 +1,11 @@
+moveit_setup_assistant_config:
+  URDF:
+    package: nsra_support
+    relative_path: urdf/nsra.xacro
+    xacro_args: ""
+  SRDF:
+    relative_path: config/nsra.srdf
+  CONFIG:
+    author_name: Noa Sendlhofer
+    author_email: noa.sendlhofer@gmail.com
+    generated_timestamp: 1587675406

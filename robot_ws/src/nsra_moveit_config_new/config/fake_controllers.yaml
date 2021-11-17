@@ -1,0 +1,16 @@
+controller_list:
+  - name: fake_nsra_controller
+    joints:
+      - Rev1
+      - Rev2
+      - Rev3
+      - Rev4
+      - Rev5
+      - Rev6
+  - name: fake_hand_controller
+    joints:
+      - Slider8
+      - Slider9
+initial:  # Define initial robot poses.
+  - group: nsra
+    pose: home
