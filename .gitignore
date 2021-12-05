@@ -3,3 +3,6 @@ robot_ws/build/
 robot_ws/logs/
 robot_ws/install/
 robot_ws/.catkin_tools/
+.DS_Store
+images/.DS_Store
+.github/
